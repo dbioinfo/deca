@@ -1,0 +1,8 @@
+raw_data/*
+!raw_data/Raw_Seq_Files_and_Metadata_V2.csv
+data/*
+logs/*
+read_filtering.R
+deca_db/*
+singularity/*
+sock/*

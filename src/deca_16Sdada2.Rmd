@@ -1,0 +1,196 @@
+---
+title: "deca-dada2_16s"
+author: "Dylan Barth"
+date: "2025-12-09"
+output: 
+  html_document:
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+#import libraries and set wd
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dada2)
+library(phyloseq)
+library(Biostrings)
+library(colorspace)
+library(vegan)
+knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca')
+```
+
+## Desert Ecology Community Assembly (DECA) dada2 analysis
+
+This document contains the pipeline to process the DECA dataset starting from QC through OTU generation and taxonomic classification. This process mostly relies on dada2 to correct errors in reads before assigning ASVs to individual sequences and quantifying their abundance. This process is incredibly computationally expensive to run on this dataset, which consists of just under 1000 environmental microbiome samples. For that reason, computationally expensive sections of the pipeline have been commented out and replaced with loading intermediate files. 
+
+####Import Metadata
+```{r import metadata}
+#import metadata
+meta <- read_csv('raw_data/Raw_Seq_Files_and_Metadata_V2.csv') 
+meta <- meta %>% mutate(SampleID=str_remove(R1, "\\_L001_R1_001.fastq.gz$")) %>% as.data.frame()
+rownames(meta) <- meta$SampleID
+```
+
+
+####Quality check some samples
+```{r quality control}
+#load forward and reverse reads
+fnFs <- paste0('raw_data/250204_Pietrakiak_demultiplxed/',meta$R1) 
+fnRs <- paste0('raw_data/250204_Pietrakiak_demultiplxed/',meta$R2)
+
+#plot qc
+for (i in 1:5){ #
+    #png(paste0('figs/dada2_fwd_qc',i,'.png')) #use these lines to save figs to specific output folder
+    print(plotQualityProfile(fnFs[(i*100):(i*100 +3)]))
+    #dev.off()
+    #png(paste0('figs/dada2_rev_qc',i,'.png'))
+    print(plotQualityProfile(fnRs[(i*100):(i*100+3)]))
+    #dev.off()
+}
+```
+Essentially in these graphs you are checking the quality at particular base-pair locations within the read. In our case, we have 250bp reads that have extremely high quality even on reverse reads. Normally you want to ensure you trim off the ends of the reads (trunc_f/r parameters) if they dip below 25-30 on the fastq Read Quality Score. You can also relax the permissible error rates if you need to include more reads (maxEE_f/r; baseline=2)
+
+
+####Filter out reads with poor quality and trim 
+```{r clean up reads, echo=F}
+#set params according to qc
+trunc_f <- 250
+trunc_r <- 250
+maxEE_f <- 2
+maxEE_r <- 2
+
+#filter by params
+filtFs <- file.path("raw_data/filt_fastq/", meta$R1)
+filtRs <- file.path("raw_data/filt_fastq/", meta$R2)
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen = c(trunc_f, trunc_r),
+                     maxN=0, maxEE=c(maxEE_f,maxEE_r), rm.phix=TRUE,
+                     compress=TRUE, multithread=TRUE)
+write.csv(out, 'data/16Sdada2/dada2_reads_filt.csv', row.names = T)
+##3 samples removed A24_53SSI_S920_L001_R2_001 A24_52SSI_S916_L001_R2_001 A24_53SSG_S918_L001_R2_001
+
+out <- read_csv('data/16Sdada2/dada2_reads_filt.csv') #load savepoint
+out <- out %>% mutate(SampleID=str_remove(...1,"\\_L001_R1_001.fastq.gz$"))
+head(out)
+summary(out$reads.in)
+summary(out$reads.out)
+ggplot(out)+
+  geom_density(aes(x=reads.in - reads.out))+
+  theme_bw()+
+  ggtitle('Number of Reads Filtered Out')
+
+```
+Here we filter the reads with the parameters from above. A summary table describing the strength of this filter is shown. A plot showing the number of reads filtered out of each individual sample is also shown. 
+
+####Run dada2
+```{r dada2, include=F}
+#prep matched files 
+filt_fs <- c()
+filt_rs <- c()
+for (sname in out$SampleID){
+    if ( (file.exists(paste0('raw_data/filt_fastq/',sname,'_L001_R1_001.fastq.gz'))) && (file.exists(paste0('raw_data/filt_fastq/',sname,'_L001_R2_001.fastq.gz')))) {
+        filt_fs <- c(filt_fs, paste0('raw_data/filt_fastq/',sname,'_L001_R1_001.fastq.gz'))
+        filt_rs <- c(filt_rs, paste0('raw_data/filt_fastq/',sname,'_L001_R2_001.fastq.gz'))
+    }
+}
+##learn error rates 
+err_f <- learnErrors(filt_fs, multithread = T)
+err_r <- learnErrors(filt_rs, multithread = T)
+
+##run dada2
+dadaFs <- dada(filt_fs, err_f, multithread = T)
+dadaRs <- dada(filt_rs, err_r, multithread = T)
+
+intout <- list(err_f=err_f, err_r=err_r, dadaFs=dadaFs, dadaRs=dadaRs) #pack data into save point
+saveRDS(intout, 'data/16Sdada2/dada2_errs.rds')
+
+#intout <- readRDS('data/16Sdada2/dada2_errs.rds') #load save point
+#names(intout)
+#list2env(intout, .GlobalEnv) #unpack the data into the env, "err_f"  "err_r"  "dadaFs" "dadaRs"
+
+## merge forward and reverse reads
+mergers <- mergePairs(dadaFs, filt_fs, dadaRs, filt_rs, verbose=TRUE)
+#save
+saveRDS(mergers,'data/16Sdada2/merged_reads_dada2.rds')
+#mergers <- readRDS('data/16Sdada2/merged_reads_dada2.rds') #load savepoint
+
+##remove chimeras
+seqtab <- makeSequenceTable(mergers)
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+print(paste0('Proportion of reads removed for chimerism: ',
+             1 - sum(seqtab.nochim)/sum(seqtab) )) #what percent of reads were chimera/bimera 
+
+```
+This is the main computational workload of the pipeline. It is not recommended to run this code locally, as it takes hours to finish even on an HPC. First, the error rates for both forward and reverse reads are learned, then corrected by the dada2 algorithm. From there reads are paired and merged, and all chimeras are removed. 
+
+
+####Assign taxonomy using SILVA db
+```{r taxonomy}
+##assign taxa from SILVA
+tax <- assignTaxonomy(seqtab.nochim, "raw_data/silva_ref/silva_nr99_v138.2_toGenus_trainset.fa.gz", multithread=TRUE)
+tax <- addSpecies(tax, "raw_data/silva_ref/silva_v138.2_assignSpecies.fa.gz")
+
+```
+Here we assign each ASV a taxonomic label, we used SILVA db v138.2 clustered at 99% to assign genus- and species-level ranks. This is also somewhat computationally expensive, and the result of these commands is captured by a downstream data product, the phyloseq object, which we generate with the following code. 
+
+####Import data into phyloseq
+```{r phyloseq}
+##create phyloseq obj
+rownames(seqtab.nochim) <- gsub('_L001_R1_001.fastq.gz','',rownames(seqtab.nochim))
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = F), sample_data(meta), tax_table(tax))
+
+##fix ASV names, exact seqs are annoying
+dna <- Biostrings::DNAStringSet(taxa_names(ps))
+names(dna) <- taxa_names(ps)
+ps <- merge_phyloseq(ps, dna)
+taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
+
+##save phyloseq
+otu <- data.frame(otu_table(ps))
+otu$Sample <- rownames(otu)
+otu <- otu %>% relocate(Sample)
+write_csv(otu,'data/16Sdada2/dada2_otu.csv')
+saveRDS(ps, 'data/16Sdada2/phyloseq_dada2.rds')
+#ps <- readRDS('data/16Sdada2/phyloseq_dada2.rds') #load savepoint
+```
+Store the data as a phyloseq object, which contains the otu table, phylogenetic tree, taxonomic rank, and sample metadata. This provides a clean starting point for downstream analysis, since it contains all the constitutive data from the experiment. 
+
+####Compute a phylogenetic tree
+```{r phylotree}
+library(DECIPHER)
+library(phangorn)
+dna <- refseq(ps)
+alignment <- AlignSeqs(dna, anchor = NA) #kwarg 'processors' when null uses all available resources --hefty
+phangAlign <- phyDat(as(alignment, "matrix"), type = "DNA") #import to phanghorn
+dm     <- dist.ml(phangAlign) #distance matrix
+treeNJ <- NJ(dm) #neighbor joining algorithm to get a starting point
+fit  <- pml(treeNJ, data = phangAlign)
+fitGTR <- optim.pml(fit, model= "GTR") #zero in on the right tree using a biological model of nulceotide substitution
+mtree <- fitGTR$tree
+phy_tree(ps) <- mtree #attach to phyloseq object
+saveRDS(ps, 'data/16Sdada2/phyloseq_dada2.rds')
+
+```
+
+Here we use the package DECIPHER to align the ASVs and the package phanghorn to create a phylogenetic tree from that alignment. First the alignment is computed, this is another expensive operation. Then, a first estimation of the phylogenetic tree is made by neighbor joining (NJ). Then a simple GTR substitution model is used to optimize the tree. The tree is then added to the phyloseq object. 
+
+####Take a quick look inside
+```{r peek}
+##first an abundance plot
+subset <- subset_samples(ps,  (SampleDate  == "Aug_2023") & (Microhabitat == "SSG") )
+subset <- prune_taxa(taxa_sums(subset) > 100, subset)
+plot_bar(subset, fill='Phylum')+theme_bw()+theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+##next a phylogenetic tree 
+topten = names(sort(taxa_sums(ps), decreasing = TRUE)[1:10]) #10 most abundant ASV
+subset <- prune_taxa(topten, ps)
+plot_tree(subset, color='Microhabitat', label.tips='Genus', ladderize='left', justify='left', size='Abundance')
+
+##some exact DNA sequences
+head(refseq(ps))
+
+```
+First we make an abundance plot. We begin by choosing samples that are specific to Aug 2023 from the SSG microhabitat. There is a somewhat large variance in library size that is evident. This variation is why rarefaction is so important with this dataset. 
+
+Next we create a plot of the top ten most abundant ASVs and show their phylogenetic relationship. Absolute abundance data is shown as dots next to the tree colored by Microhabitat. 
+
+Lastly, we take a look at the exact sequences available in the phyloseq object and confirm they are the right length and show some level of conservation. 
