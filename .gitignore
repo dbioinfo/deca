@@ -6,3 +6,4 @@ read_filtering.R
 deca_db/*
 singularity/*
 sock/*
+.Rhistory
