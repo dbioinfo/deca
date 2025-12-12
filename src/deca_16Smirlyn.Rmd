@@ -1,0 +1,34 @@
+---
+title: "deca_16Smirlyn"
+author: "Dylan Barth"
+date: "2025-12-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#import libraries and set wd
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dada2)
+library(phyloseq)
+library(Biostrings)
+library(colorspace)
+library(vegan)
+library(mirlyn)
+knitr::opts_knit$set(root.dir = '')
+```
+
+## Desert Ecology Community Assembly (DECA) mirlyn rarefaction 
+
+Due to high variance in the library sizes, it's wise to perform repeated rarefactions before calculating diversity statistics. 
+
+```{r import}
+#import data
+ps <- t(readRDS('data/16Sdada2/phyloseq_dada2.rds'))
+otu <- otu_table(ps, taxa_are_rows = F)
+meta <- data.frame(sample_data(ps))
+psdf <- phyloseq_to_df(t(ps))
+
+
+
+```

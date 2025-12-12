@@ -7,8 +7,8 @@ output:
     self_contained: true
 ---
 
-```{r setup, include=FALSE}
-#import libraries and set wd
+```{r setup, include=FALSE, echo=FALSE}
+##import libraries and set wd
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(dada2)
@@ -16,29 +16,40 @@ library(phyloseq)
 library(Biostrings)
 library(colorspace)
 library(vegan)
-knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca')
+knitr::opts_knit$set(root.dir = '/scratch')
 ```
-
 ## Desert Ecology Community Assembly (DECA) dada2 analysis
 
 This document contains the pipeline to process the DECA dataset starting from QC through OTU generation and taxonomic classification. This process mostly relies on dada2 to correct errors in reads before assigning ASVs to individual sequences and quantifying their abundance. This process is incredibly computationally expensive to run on this dataset, which consists of just under 1000 environmental microbiome samples. For that reason, computationally expensive sections of the pipeline have been commented out and replaced with loading intermediate files. 
 
 ####Import Metadata
 ```{r import metadata}
-#import metadata
+##import metadata
 meta <- read_csv('raw_data/Raw_Seq_Files_and_Metadata_V2.csv') 
 meta <- meta %>% mutate(SampleID=str_remove(R1, "\\_L001_R1_001.fastq.gz$")) %>% as.data.frame()
 rownames(meta) <- meta$SampleID
+
+##check out sample distribution
+##first by microhabitat
+meta %>% group_by(Microhabitat) %>% summarize(count=n())
+
+##then by timepoint
+meta %>% group_by(SampleDate) %>% summarize(count=n())
+
+##then by experimental condition
+meta %>% group_by(Treatment) %>% summarize(count=n())
+
 ```
+We start by importing the data and showing the distribution of samples across variables. 
 
 
 ####Quality check some samples
 ```{r quality control}
-#load forward and reverse reads
+##load forward and reverse reads
 fnFs <- paste0('raw_data/250204_Pietrakiak_demultiplxed/',meta$R1) 
 fnRs <- paste0('raw_data/250204_Pietrakiak_demultiplxed/',meta$R2)
 
-#plot qc
+##plot qc
 for (i in 1:5){ #
     #png(paste0('figs/dada2_fwd_qc',i,'.png')) #use these lines to save figs to specific output folder
     print(plotQualityProfile(fnFs[(i*100):(i*100 +3)]))
@@ -48,18 +59,18 @@ for (i in 1:5){ #
     #dev.off()
 }
 ```
-Essentially in these graphs you are checking the quality at particular base-pair locations within the read. In our case, we have 250bp reads that have extremely high quality even on reverse reads. Normally you want to ensure you trim off the ends of the reads (trunc_f/r parameters) if they dip below 25-30 on the fastq Read Quality Score. You can also relax the permissible error rates if you need to include more reads (maxEE_f/r; baseline=2)
+In these graphs you are checking the quality at particular base-pair locations within the read. In our case, we have 250bp reads that have extremely high quality even on reverse reads. Normally you want to ensure you trim off the ends of the reads (trunc_f/r parameters) if they dip below 25-30 on the fastq Read Quality Score. You can also relax the permissible error rates if you need to include more reads (maxEE_f/r; baseline=2)
 
 
 ####Filter out reads with poor quality and trim 
-```{r clean up reads, echo=F}
-#set params according to qc
+```{r clean up reads}
+##set params according to qc
 trunc_f <- 250
 trunc_r <- 250
 maxEE_f <- 2
 maxEE_r <- 2
 
-#filter by params
+##filter by params
 filtFs <- file.path("raw_data/filt_fastq/", meta$R1)
 filtRs <- file.path("raw_data/filt_fastq/", meta$R2)
 out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen = c(trunc_f, trunc_r),
@@ -79,11 +90,11 @@ ggplot(out)+
   ggtitle('Number of Reads Filtered Out')
 
 ```
-Here we filter the reads with the parameters from above. A summary table describing the strength of this filter is shown. A plot showing the number of reads filtered out of each individual sample is also shown. 
+Here we filter the reads with the parameters from above. A summary table describing the strength of this filter is shown. A plot showing the number of reads filtered out is also shown. 
 
 ####Run dada2
-```{r dada2, include=F}
-#prep matched files 
+```{r dada2}
+##prep matched files 
 filt_fs <- c()
 filt_rs <- c()
 for (sname in out$SampleID){
@@ -109,7 +120,7 @@ saveRDS(intout, 'data/16Sdada2/dada2_errs.rds')
 
 ## merge forward and reverse reads
 mergers <- mergePairs(dadaFs, filt_fs, dadaRs, filt_rs, verbose=TRUE)
-#save
+## save
 saveRDS(mergers,'data/16Sdada2/merged_reads_dada2.rds')
 #mergers <- readRDS('data/16Sdada2/merged_reads_dada2.rds') #load savepoint
 
@@ -154,24 +165,6 @@ saveRDS(ps, 'data/16Sdada2/phyloseq_dada2.rds')
 ```
 Store the data as a phyloseq object, which contains the otu table, phylogenetic tree, taxonomic rank, and sample metadata. This provides a clean starting point for downstream analysis, since it contains all the constitutive data from the experiment. 
 
-####Compute a phylogenetic tree
-```{r phylotree}
-library(DECIPHER)
-library(phangorn)
-dna <- refseq(ps)
-alignment <- AlignSeqs(dna, anchor = NA) #kwarg 'processors' when null uses all available resources --hefty
-phangAlign <- phyDat(as(alignment, "matrix"), type = "DNA") #import to phanghorn
-dm     <- dist.ml(phangAlign) #distance matrix
-treeNJ <- NJ(dm) #neighbor joining algorithm to get a starting point
-fit  <- pml(treeNJ, data = phangAlign)
-fitGTR <- optim.pml(fit, model= "GTR") #zero in on the right tree using a biological model of nulceotide substitution
-mtree <- fitGTR$tree
-phy_tree(ps) <- mtree #attach to phyloseq object
-saveRDS(ps, 'data/16Sdada2/phyloseq_dada2.rds')
-
-```
-
-Here we use the package DECIPHER to align the ASVs and the package phanghorn to create a phylogenetic tree from that alignment. First the alignment is computed, this is another expensive operation. Then, a first estimation of the phylogenetic tree is made by neighbor joining (NJ). Then a simple GTR substitution model is used to optimize the tree. The tree is then added to the phyloseq object. 
 
 ####Take a quick look inside
 ```{r peek}
@@ -180,17 +173,32 @@ subset <- subset_samples(ps,  (SampleDate  == "Aug_2023") & (Microhabitat == "SS
 subset <- prune_taxa(taxa_sums(subset) > 100, subset)
 plot_bar(subset, fill='Phylum')+theme_bw()+theme(axis.text.x = element_text(angle = 45, hjust=1))
 
-##next a phylogenetic tree 
-topten = names(sort(taxa_sums(ps), decreasing = TRUE)[1:10]) #10 most abundant ASV
-subset <- prune_taxa(topten, ps)
-plot_tree(subset, color='Microhabitat', label.tips='Genus', ladderize='left', justify='left', size='Abundance')
-
 ##some exact DNA sequences
 head(refseq(ps))
 
+##then check the library sizes 
+gdat <- tibble(ncounts=sample_sums(ps), SampleID=sample_names(ps))
+gdat <- left_join(meta, gdat, by='SampleID')
+gdat <- gdat %>% mutate(SampleDate=factor(SampleDate, 
+                                          levels=c("Jul_2022", "Nov_2022" ,  
+                                                   "Feb_2023", "Aug_2023", "Nov_2023",
+                                                   "Feb_2024", "Aug_2024",
+                                                   "Pos_Control1","Pos_Control2","Neg_Control"))) %>% 
+                mutate(Microhabitat=factor(Microhabitat, levels=c("SG","SI","SSG","SSI",
+                                                                  "Pos_Control1","Pos_Control2","Neg_Control")))
+#library sizes by timepoint and microhabitat
+ggplot(gdat)+
+  geom_jitter(aes(x=SampleDate, y=ncounts, color=Microhabitat), width = .3, height=.3, alpha=0.9)+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust=.67, hjust=.5))+
+  ggtitle('Library Sizes (16S)')+
+  ylab('N Counts')+
+  scale_color_manual(values = c('#ed98e3','#deb266','#a51be0','#e07b1b',
+                                '#d9d9d9','#98e895','#6fdec8'))
+
 ```
-First we make an abundance plot. We begin by choosing samples that are specific to Aug 2023 from the SSG microhabitat. There is a somewhat large variance in library size that is evident. This variation is why rarefaction is so important with this dataset. 
+First we make an abundance plot. We begin by choosing samples that are specific to Aug 2023 from the SSG microhabitat. 
 
-Next we create a plot of the top ten most abundant ASVs and show their phylogenetic relationship. Absolute abundance data is shown as dots next to the tree colored by Microhabitat. 
+Next, we take a look at the exact sequences available in the phyloseq object and confirm they are the right length and show some level of conservation between sequences. 
 
-Lastly, we take a look at the exact sequences available in the phyloseq object and confirm they are the right length and show some level of conservation. 
+Lastly, we graph the library sizes of the data. There is a somewhat large variance in library size that is evident. This variation is why rarefaction is so important with this dataset. 
