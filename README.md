@@ -1,4 +1,4 @@
-#Desert Ecology Community Assembly
+# Desert Ecology Community Assembly
 
 src/deca_16Sdada2.Rmd
 - This script performs qc, error correction, abundance quantification and taxonomic classification. The resulting data product is a phyloseq object containing an otu table, taxonomic classifications, sample metadata and reference sequences.  
