@@ -1,0 +1,100 @@
+---
+title: "deca_decontam.Rmd"
+author: "Dylan Barth"
+date: "2025-12-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(vegan)
+library(phyloseq)
+library(decontam)
+knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
+```
+
+## Decontam and Filtering
+In this script, we test for contamination found in our negative control sample. We then remove any ASVs identified as contamination. We also remove all samples with libraries below a threshold of 2500 reads. This cleans the data and prepares it for downstream analysis. 
+
+#### Import data
+```{r import}
+ps <- readRDS('data/16Sdada2/phyloseq_dada2.rds')
+meta <- data.frame(sample_data(ps))
+
+##check the distribution of library size
+gdat <- tibble(ncounts=sample_sums(ps), SampleID=sample_names(ps))
+gdat <- left_join(meta, gdat, by='SampleID')
+gdat <- gdat %>% arrange(-ncounts) %>% mutate(index=row_number())
+ggplot(gdat)+
+  geom_point(aes(x=index, y=ncounts))+
+  theme_bw()+
+  xlab("Index")+
+  ylab("Library Size")+
+  ggtitle("Distribution of read counts")
+
+```
+
+
+#### Run decontam
+
+Here we run the decontam library pipeline to identify contamination in our samples as determined by presence in our negative control sample. These ASV are then dropped from the analysis.
+
+
+```{r decontam}
+##check which is a neg control
+sample_data(ps)[which(grepl('Neg', sample_data(ps)$Microhabitat)),]
+sample_data(ps)$is.neg <- sample_data(ps)$Microhabitat=='Neg_Control'
+
+##run decontam
+decdf <- isContaminant(ps, method='prevalence', neg='is.neg')
+cindx <- which(decdf$contaminant)
+
+##check abundances
+tdat <- as.data.frame(otu_table(ps))[,cindx]
+tdat[which(tdat>0)]
+
+##plot abundance
+tmp <- prune_taxa(paste('ASV', cindx, sep=''), ps)
+tmp <- subset_samples(tmp, sample_sums(tmp)>0)
+plot_bar(tmp, x='Sample',fill='Phylum') + theme_bw()
+
+##remove taxa
+comp_tax <- setdiff(taxa_names(ps), paste('ASV', cindx, sep='')) 
+ps <- prune_taxa(comp_tax, ps)
+```
+
+#### Filter low library sizes
+
+Here we filter out sample libraries with less than 2500 reads. Note the gap separating extremely low abundance libraries and the rest of the data. We also need to remove any taxa that were unique to those samples. The process is finished by saving this pruned data to a new file, keeping the old phyloseq object in tact for rare-species analysis. 
+
+```{r filter-samples}
+
+##check low abundance distribution
+thresh <- 2500
+ggplot(gdat %>% filter(ncounts<10000))+
+  geom_point(aes(x=index, y=ncounts))+
+  geom_hline(aes(yintercept=thresh), color='darkorange')+
+  theme_bw()+
+  xlab("Index")+
+  ylab("Library Size")+
+  ggtitle("Distribution of read counts < 10,000")
+
+#filter samples
+ps.filt <- subset_samples(ps, sample_sums(ps) > thresh)
+ps.filt <- prune_taxa( taxa_sums(ps.filt) > 0, ps.filt)
+
+gdat <- tibble(ncounts=sample_sums(ps.filt), SampleID=sample_names(ps.filt))
+gdat <- left_join(meta, gdat, by='SampleID')
+gdat <- gdat %>% arrange(-ncounts) %>% mutate(index=row_number())
+ggplot(gdat %>% filter(ncounts<10000))+
+  geom_point(aes(x=index, y=ncounts))+
+  theme_bw()+
+  xlab("Index")+
+  ylab("Library Size")+
+  ggtitle("Distribution of read counts < 10,000 after filtering")
+
+##save 
+saveRDS(ps.filt, file='data/16Sdada2/phyloseq.filtered.rds')
+```
+
