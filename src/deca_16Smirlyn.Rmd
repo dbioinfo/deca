@@ -15,20 +15,106 @@ library(Biostrings)
 library(colorspace)
 library(vegan)
 library(mirlyn)
-knitr::opts_knit$set(root.dir = '')
+knitr::opts_knit$set(root.dir = '/scratch')
 ```
 
-## Desert Ecology Community Assembly (DECA) mirlyn rarefaction 
+## Library rarefaction with mirlyn
 
-Due to high variance in the library sizes, it's wise to perform repeated rarefactions before calculating diversity statistics. 
+Due to high variance in the library sizes, it's wise to perform repeated rarefactions before downstream processes. To demonstrate this, alpha diversity in a subset of the data is shown before and after rarefaction. 
+
+The trick to this piece of the analysis is managing your CPU cores and memory closely, as the only software that does rarefaction correctly is poorly optimized for scaling. Keep an eye on the activity of the script while it is running with 'htop'. 
 
 ```{r import}
 #import data
 ps <- t(readRDS('data/16Sdada2/phyloseq_dada2.rds'))
-otu <- otu_table(ps, taxa_are_rows = F)
 meta <- data.frame(sample_data(ps))
-psdf <- phyloseq_to_df(t(ps))
-
-
 
 ```
+
+## Choose a rarefaction threshold 
+
+Choosing a rarefaction threshold is a critical part of this analysis. It's ideal to choose a threshold that doesn't exclude too many samples, since any samples with a library lower than the threshold will be discarded. But choosing too low of a threshold will underestimate the diversity of certain large libraries. It is *very important* to mind the resource usage when running this code, as it has crashed our HPC before. Watch RAM and CPU usage which are modulated by the number of replications (`rep`) and the number of cores used (`mc.cores`) respectively. 
+
+```{r pick-threshold}
+thresh <- 10000
+whole_rep <- rarefy_whole_rep(ps, rep = 10, mc.cores=80)
+rarecurve(whole_rep, sample = "Sample") + geom_vline(aes(xintercept=thresh)) + theme(legend.position="none")
+```
+
+## Perform multiple rarefaction
+
+After choosing the threshold, use mirlyn to perform repeated rarefactions. This produces a very large data product containing `mrep` number of phyloseq objects, each with uniform library sizes of size `thresh`. This data product will be useful for downstream analysis, but is ~15Gb large, so be careful opening it on a laptop. 
+
+```{r run-mirlyn}
+mrep <- 50
+mrare <- mirl(ps, libsize=thresh, rep=mrep, replace=F, mc.cores=80)
+saveRDS(mrare, 'data/mirlyn/mirl.rds') ##save
+
+##check for uniformity of sampling size
+print('Library size distribution') #should be all 'thresh' size
+summary( sample_sums(mrare[[1]]) )
+
+##look at some quick examples 
+print('Rep 10 Subset')
+head(otu_table( subset_samples(mrare[[10]],  (SampleDate  == "Aug_2023") & (Microhabitat == "SSG") ) )[,1:5] )
+print('Rep 50 Subset')
+head(otu_table( subset_samples(mrare[[50]],  (SampleDate  == "Aug_2023") & (Microhabitat == "SSG") ) )[,1:5] ) 
+```
+
+## Calculate mean alpha diversity in each sample
+
+Now that we have repeated rarefactions, we can calculate alpha for each replication and get an average value. This results in `mrep` number of alpha values per-sample, which we graph to estimate an average alpha value for each sample. Then we use the alpha cone function in mirlyn to get confidence boundaries on alpha values within particular variables (Microhabitat, Timepoint, Treatment)
+
+```{r calculate-rare-alpha}
+alphadiv_df <- alphadivDF(mrare,diversity = "shannon")
+galpha <- alphawichVis(alphadiv_df, xvar = "SampleID", colorvar = "Microhabitat") + 
+  theme(axis.text.x = element_text(angle=75, vjust = 0.7, hjust = .6))
+##entire dataset alpha values
+galpha
+
+##alpha cone
+acone <- alphacone(ps, rep=20, diversity = "shannon", replace=F, mc.cores=80)
+gcone <- alphaconeVis(acone, cols = "Microhabitat") + geom_vline(aes(xintercept=thresh), color='darkorange')
+gcone #habitat gcone
+
+gcone <- alphaconeVis(acone, cols = "SampleDate") + geom_vline(aes(xintercept=thresh), color='darkorange')
+gcone #timepoint gcone
+
+gcone <- alphaconeVis(acone, cols = "Treatment") + geom_vline(aes(xintercept=thresh), color='darkorange')
+gcone #treatment gcone
+
+saveRDS(alphadiv_df, 'data/mirlyn/rare_alpha.rds')
+```
+
+
+## Un-rarefied alpha diversity
+
+To visualize the difference in rarefied alpha diversities, first we graph the same statistic (shannon alpha diversity) with no rarefaction. 
+
+```{r raw-alpha-graph}
+subset <- subset_samples(ps,  (SampleDate  == "Aug_2023") & (Microhabitat == "SSG") )
+plot_richness(subset, color='Treatment', measures='Shannon') + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle=90)) + 
+  scale_color_brewer(palette = 'Dark2')+
+  ggtitle('Alpha Diversity Un-rarefied')
+
+```
+
+Then we make the same graph with rarefied data and observe that the alpha values are grouped closer to one another. This has corrected the correlation between diversity and library size. 
+
+```{r rare-alpha-graph}
+tmp <- list()
+for (i in 1:mrep){ #iter through mreps and subsample to match above
+  tmp[[i]] <- subset_samples(mrare[[i]],  (SampleDate  == "Aug_2023") & (Microhabitat == "SSG") )
+}
+alphadiv_df <- alphadivDF(tmp,diversity = "shannon")
+galpha <- alphawichVis(alphadiv_df, xvar = "SampleID", colorvar = "Treatment") + 
+  theme(axis.text.x = element_text(angle=75, vjust = 0.7, hjust = .6)) +
+  scale_color_brewer(palette = 'Dark2')+ 
+  theme_bw() + 
+  ggtitle('Alpha Diversity Rarefied')
+##subset alpha values
+galpha
+```
+
