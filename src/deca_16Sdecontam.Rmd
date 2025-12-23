@@ -94,6 +94,17 @@ ggplot(gdat %>% filter(ncounts<10000))+
   ylab("Library Size")+
   ggtitle("Distribution of read counts < 10,000 after filtering")
 
+```
+
+#### Remove Control Samples
+
+We also don't want any of the control samples in our downstream analyses, so we prune them out as well. 
+
+
+```{r prune-controls}
+rem <- sample_names(ps.filt)[grepl('STANDARD|C6',sample_names(ps.filt))] 
+ps.filt <- prune_samples(!(sample_names(ps.filt) %in% rem), ps.filt)
+
 ##save 
 saveRDS(ps.filt, file='data/16Sdada2/phyloseq.filtered.rds')
 ```

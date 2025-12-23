@@ -1,0 +1,107 @@
+---
+title: "deca_16S_ancombc"
+author: "Dylan Barth"
+date: "2025-12-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(colorspace)
+library(phyloseq)
+library(ANCOMBC)
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '/scratch')
+
+#define a function that prints the head and tail of a df
+ht <- function(d, m=5, n=m){
+  # print the head and tail together
+  list(HEAD = head(d,m), TAIL = tail(d,n))
+}
+```
+
+## Import the phyloseq object
+
+Here we make use of the highly integrated phyloseq data type. The phyloseq object we built previously plugs directly into ANCOMBC with minimal preprocessing. The one minimal step we need to take before each run of `ancombc2()` is to create a single `Group` variable that accounts for the combination we are interested in. The first example combines `Microhabitat` and `SampleDate` and is used to detect structural zeroes. 
+
+Structural zeroes are a special case of differential abundance, wherein a taxa (class, order, phylum, etc.) is completely absent from one group. In ancombc2, the software preprocesses these taxa and filters them out, so the `Group` variable should map to the same samples as the formula in the kwarg `fix_formula=`. Ultimately the choice of independent variable here will determine the sample size within each group, so we conclude by checking the sample sizes of each group. 
+
+```{r import_preprocess}
+ps <- readRDS('data/16Sdada2/phyloseq.filtered.rds')
+meta <- sample_data(ps)
+sample_data(ps)$Group <- data.frame(meta) %>% 
+  mutate(Group=paste(Microhabitat, SampleDate, sep='_') ) %>% 
+  pull(Group) 
+#check the size of groups briefly to ensure high N
+data.frame(sample_data(ps)) %>% group_by(Group) %>% summarize(n=n()) %>% arrange(n) %>% ht()
+```
+
+## Run ancombc2 for Microhabitat+SampleDate
+
+Here we set up the run for ancombc2 and save the output. This package natively supports a mixed effects model, which we make explicit by setting `rand_formula=NULL`. The formula used in `fix_formula` defines the groups between which the differential abundance test is to be constructed. To start, we begin with a simple combination of `Microhabitat` and `SampleDate` to capture temporal- and host-specific effects. 
+
+We also set `tax_level='Genus'` to define the taxonomic level at which to group ASVs. Depending on the fidelity of the data/annotation, this value can be scaled all the way back to 'Phylum', but may not be informative at a wider scope. 
+
+This operation is a well optimized piece of software, but we still need to take care to not overload our HPC with such a large dataset. The main concern is running near RAM limits, as holding a large ~45,000 x ~900 ASV matrix in memory is not optimal. Two parameters can be tuned to effectively limit the memory requirements: `prv_cut` which excludes ASVs below the stated prevalence threshold [0,1], making the matrix itself smaller. The other, `n_cl` controls the number of nodes to be forked during parallel processing. Each node here needs to do operations upon this matrix and pulls it into memory, so increasing this number can quickly balloon your RAM usage. 
+
+
+```{r run-micro_time}
+
+#run with Microhabitat+SampleDate to start
+out <- ancombc2(data = ps,
+               fix_formula='Microhabitat+SampleDate',
+               rand_formula = NULL,
+               tax_level="Phylum",
+               p_adj_method = 'holm',
+               prv_cut = 0.1,
+               n_cl = 20,
+               group='Group',
+               pairwise = T,
+               struc_zero = T,
+               neg_lb = F)
+
+#save
+saveRDS('data/16Sancombc/ancombc.mh_time.out.rds')
+
+```
+
+## Graph Significant Taxa
+
+
+
+```{r graph-micro}
+
+out$res_pair %>% select(starts_with("diff")) %>% summarize_all(sum)
+gdat <- out$res_pair
+sigtaxs<-gdat %>% filter(diff_MicrohabitatCreosote|diff_MicrohabitatMariola|diff_MicrohabitatMesquite|diff_MicrohabitatTarbush) %>% pull(taxon)
+ggdat <- gdat %>% 
+  filter(taxon %in% sigtaxs) %>% 
+  group_by(taxon) %>% 
+  select(starts_with("lfc")) %>% 
+  pivot_longer(starts_with("lfc"),names_to='comparison', values_to = 'LFC') %>% 
+  mutate(comparison = sub("^lfc_", "", comparison)) %>% 
+  mutate(comparison= sub("*Shrub*","", comparison))%>% 
+  mutate(comparison= sub("*Shrub*","", comparison))
+
+glevs <- c("Creosote","Mariola", "Mesquite","Tarbush", "Mariola_Creosote", 
+           "Mesquite_Creosote", "Tarbush_Creosote",  "Mesquite_Mariola","Tarbush_Mariola","Tarbush_Mesquite" )
+
+ggdat <- ggdat %>% mutate(comparison=factor(comparison, levels=glevs))
+
+gg <- ggplot(ggdat)+
+  geom_tile(mapping=aes(x=comparison, y=taxon, fill=LFC))+
+  scale_fill_viridis_c(option='plasma')+
+  theme_bw() +
+  theme(
+    text = element_text(size = 18),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank(), 
+    panel.border = element_blank())+
+  xlab("")+
+  ylab("Taxon")
+gg
+ggsave('figs/Genus_lvl_heatmap.png', height=4000, width=4000, dpi=300, units='px')
+
+
+```
+

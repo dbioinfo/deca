@@ -39,3 +39,15 @@ ssg <- tbl(con, 'meta') %>% filter(Microhabitat=='SSG') %>% pull(Sample)
 taxs <- tbl(con, 'tax') %>% filter(Phylum=='Thermoproteota') %>% pull(ASV)
 #how many thermoproteota species are found in all ssg samples? (did that run quickly? if so, proceed, if not, db needs optimization)
 tmp %>% filter(Sample %in% ssg, ASV %in% taxs, Abundance>0) %>% tally()
+
+#now write all the mirlyn reps to the database
+mirl <- readRDS('data/mirlyn/mirl.rds')
+dbExecute(con, 'DROP TABLE IF EXISTS mirl;')
+for (i in 1:length(mirl)){
+  tmp <- data.frame(otu_table(mirl[[i]]))
+  tmp$rep <- i
+  dbWriteTable(con, 'mirl', tmp, append=T)
+  print(i)
+}
+
+
