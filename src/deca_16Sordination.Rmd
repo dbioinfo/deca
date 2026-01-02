@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(phyloseq)
 library(vegan)
-knitr::opts_knit$set(root.dir = '/scratch')
+knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -23,17 +23,30 @@ As always, we begin by importing the data and preprocessing it for our main algo
 ps <- readRDS('data/16Sdada2/phyloseq.filtered.rds')
 mat <- data.frame(otu_table(ps))
 dim(mat) #ensure samples x species, should have many more species
-meta <- data.frame(sample_data(ps)) %>% rename(Sample=SampleID)
+
+#preprocess metadata
+timelevs <- c("Jul_2022","Nov_2022","Feb_2023", "Aug_2023","Nov_2023", "Feb_2024","Aug_2024")
+treatlevs <- c("Baseline","Control","Water","N", "N+P","N+Water","P","P+Water","N+P+Water")
+treatcols <- c("#E3E571","#E5AE71","#71C4E5","#53DF7B","#C0E5A4","#BCE7D6","#DF53B7","#E7BCCC","#804DEF")
+mhablevs <- c("SI","SG","SSI","SSG")
+mcols <- c("#B897DD","#BCDD97","#B43FEE","#78EE3F")
+mshapes <- c(25,10,17,16)
+
+meta <- data.frame(sample_data(ps)) %>% 
+  rename(Sample=SampleID) %>% 
+  mutate(SampleDate=factor(SampleDate, levels=timelevs)) %>% 
+  mutate(Treatment=factor(Treatment, levels=treatlevs)) %>% 
+  mutate(Microhabitat=factor(Microhabitat, levels=mhablevs))
 ```
 
 ## Generate Distance Matrix
 
-NMDS (Non-metric MultiDimensional Scaling) is a dimension reduction technique that works well for ordinal data, due to the fact that this method does not assume that the data are embedded in euclidean space like, say, PCA does. It does, however, require calculating the distance matrix which is an n x n matrix, so it can easily fit in memory. There is a more automated way to do this, with `metaMDS()`, but we will make use of the distance matrix in subsequent analyses. We normalize the data using the hellinger transformation, which transforms the data to account for library size and relative composition. Unfortunately there isn't an elegant way to optimize this code. 
+NMDS (Non-metric MultiDimensional Scaling) is a dimension reduction technique that works well for ordinal data, due to the fact that this method does not assume that the data are embedded in euclidean space like, say, PCA does. It does, however, require calculating the distance matrix which is an n x n matrix, so it can easily fit in memory. There is a more automated way to do this, with `metaMDS()`, but we will make use of the distance matrix in subsequent analyses. 
 
 
-```{r distance-bray}
-X <- vegdist(mat, method='hellinger')
-saveRDS(X, 'data/16Svegan/hell.dist.rds')
+```{r full-distance-bray}
+X <- vegdist(mat, method='bray')
+saveRDS(X, 'data/16Svegan/bray.dist.rds')
 
 ```
 
@@ -42,18 +55,16 @@ saveRDS(X, 'data/16Svegan/hell.dist.rds')
 From this distance matrix, we can calculate the NMDS coordinates of each sample using the `metaMDS()` function. We choose to reduce the data into `k=3` dimensions and return not only NMDS coordinates for samples, but also species using the `wascores = T` argument. The arguments `try` and `trymax` limit the minimum and maximum numbers of random starts in search of stable solutions, each random seed requires its own calculation, the number of which that are allowed to concurrently run is controlled by the argument `parallel`. The argument `maxit` controls the maximum number of gradient descent steps allowed in each random seed. 
 
 
-```{r run-nmds}
+```{r run-full-nmds, echo=F}
 out <- metaMDS(X,
                k=3,
                wascores = T,
                weakties=T,
                try=50,
-               trymax=70,
-               parallel=40,
-               maxit=50)
-saveRDS(out, 'data/16Svegan/deca_nmds.rds')
-
-str(out)
+               trymax=100,
+               parallel=8,
+               maxit=300)
+saveRDS(out, 'data/16Svegan/deca_full_nmds.rds')
 
 ```
 
@@ -61,17 +72,21 @@ str(out)
 
 Here we ensure that the solution we found is relatively well suited to the dataset. We do this by checking the stress (for NMDS, <0.1 is desirable, >0.2 is unreliable), goodness of fit, and by plotting the observed distance in the distance matrix against the euclidean distance in NMDS space. We expect the correlation to be positive, but not necessarily linear.
 
-```{r goodness-of-fit}
+```{r full-goodness-of-fit, out.width="90%", dpi=300}
 print(paste0("Stress of NMDS model: ", out$stress))
 
 gdat <- data.frame(out$points)
 gdat$goodness <- goodness(out)
 gdat$Sample <- rownames(gdat)
 gdat <- left_join(gdat, meta, by='Sample')
+
 ggplot(gdat)+
-  geom_jitter(aes(x=SampleDate, y=goodness, color=Microhabitat), height = 0, width=0.25)+
+  geom_jitter(aes(x=SampleDate, y=goodness, color=Treatment, shape=Microhabitat), 
+              size=4, height = 0, width=0.25, alpha=0.85)+
   theme_bw()+
-  xlab("Shrub")+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  xlab("Date")+
   ylab("Goodness of Fit")
 
 
@@ -81,20 +96,117 @@ stressplot(out)
 
 ## Generate ordination plots
 
-For now, we only graph in two dimensions. In a later example, we will include an interactive shiny element that allows the user to control the variable mapped to color in 3D. 
+For now, we only graph in two dimensions at a time. Color is mapped to Treatment and shape is mapped to Microhabitat. 
 
 
-```{r graph-nmds}
+```{r graph-full-nmds, out.width="90%", dpi=300}
 ggplot(gdat)+
-  geom_point(aes(x=MDS1, y=MDS2, color=Microhabitat))+
+  geom_point(aes(x=MDS1, y=MDS2, color=Treatment, shape=Microhabitat),
+             size=3, alpha=0.85)+
   theme_bw()+
+  theme(text = element_text(size=15))+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
   facet_wrap(~SampleDate)+
   ggtitle('MDS1 v MDS2')
 
 ggplot(gdat)+
-  geom_point(aes(x=MDS2, y=MDS3, color=Microhabitat))+
+  geom_point(aes(x=MDS2, y=MDS3, color=Treatment, shape=Microhabitat),
+             size=3, alpha=0.85)+
   theme_bw()+
+  theme(text = element_text(size=15))+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
   facet_wrap(~SampleDate)+
   ggtitle('MDS2 v MDS3')
 
 ```
+
+
+```{r nmds-by-depth}
+sidx <- meta %>% filter(Surface_Subsurface=='S') %>% rownames()
+ssidx <- meta %>% filter(Surface_Subsurface=='SS') %>% rownames()
+sX <- vegdist(mat[sidx,], method='bray')
+saveRDS(sX, 'data/16Svegan/surface.bray.dist.rds')
+ssX <- vegdist(mat[ssidx,], method='bray')
+saveRDS(ssX, 'data/16Svegan/subsurface.bray.dist.rds')
+
+sout <- metaMDS(sX,
+               k=3,
+               wascores = T,
+               weakties=T,
+               try=50,
+               trymax=100,
+               parallel=8,
+               maxit=300)
+saveRDS(sout, 'data/16Svegan/deca_surface_nmds.rds')
+ssout <- metaMDS(ssX,
+               k=3,
+               wascores = T,
+               weakties=T,
+               try=50,
+               trymax=100,
+               parallel=8,
+               maxit=300)
+saveRDS(ssout, 'data/16Svegan/deca_suburface_nmds.rds')
+
+print(paste0("Stress of Surface NMDS model: ", sout$stress))
+print(paste0("Stress of Subsurface NMDS model: ", ssout$stress))
+
+
+gdat <- data.frame(sout$points)
+gdat$goodness <- goodness(sout)
+gdat$Sample <- rownames(gdat)
+gdat <- left_join(gdat, meta, by='Sample')
+
+ggplot(gdat)+
+  geom_jitter(aes(x=SampleDate, y=goodness, color=Treatment, shape=Microhabitat), 
+              size=4, height = 0, width=0.25, alpha=0.85)+
+  theme_bw()+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  xlab("Date")+
+  ylab("Goodness of Fit")+
+  ggtitle("Surface GOF")
+
+stressplot(sout)
+
+ggplot(gdat)+
+  geom_point(aes(x=MDS1, y=MDS2, color=Treatment, shape=Microhabitat),
+             size=3, alpha=0.85)+
+  theme_bw()+
+  theme(text = element_text(size=15))+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  facet_wrap(~SampleDate)+
+  ggtitle('Surface MDS1 v MDS2')
+
+gdat <- data.frame(ssout$points)
+gdat$goodness <- goodness(ssout)
+gdat$Sample <- rownames(gdat)
+gdat <- left_join(gdat, meta, by='Sample')
+
+ggplot(gdat)+
+  geom_jitter(aes(x=SampleDate, y=goodness, color=Treatment, shape=Microhabitat), 
+              size=4, height = 0, width=0.25, alpha=0.85)+
+  theme_bw()+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes[3:4])+
+  xlab("Date")+
+  ylab("Goodness of Fit")+
+  ggtitle("Subsurface GOF")
+
+stressplot(ssout)
+
+ggplot(gdat)+
+  geom_point(aes(x=MDS1, y=MDS2, color=Treatment, shape=Microhabitat),
+             size=3, alpha=0.85)+
+  theme_bw()+
+  theme(text = element_text(size=15))+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes[3:4])+
+  facet_wrap(~SampleDate)+
+  ggtitle('Subsurface MDS1 v MDS2')
+
+```
+
