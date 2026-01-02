@@ -11,7 +11,7 @@ library(colorspace)
 library(phyloseq)
 library(ANCOMBC)
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = '/scratch')
+knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
 
 #define a function that prints the head and tail of a df
 ht <- function(d, m=5, n=m){
@@ -34,74 +34,220 @@ sample_data(ps)$Group <- data.frame(meta) %>%
   pull(Group) 
 #check the size of groups briefly to ensure high N
 data.frame(sample_data(ps)) %>% group_by(Group) %>% summarize(n=n()) %>% arrange(n) %>% ht()
+
+#filter low sample size
+ps <- subset_samples(ps, SampleDate != "Jul_2022")
+ps <- prune_taxa(taxa_sums(ps)>0,ps)
 ```
 
-## Run ancombc2 for Microhabitat+SampleDate
+## Run ancombc2 microhabitat contrast
 
-Here we set up the run for ancombc2 and save the output. This package natively supports a mixed effects model, which we make explicit by setting `rand_formula=NULL`. The formula used in `fix_formula` defines the groups between which the differential abundance test is to be constructed. To start, we begin with a simple combination of `Microhabitat` and `SampleDate` to capture temporal- and host-specific effects. 
+Here we set up the run for ancombc2 and save the output. This package natively supports a mixed effects model, which we make explicit by setting `rand_formula=NULL`. The formula used in `fix_formula` defines the variables that are accounted for in the full statistical model, while `groups` are groups between which structural zeroes are detected. To start, we begin with a test between surface and subsurface since this variable explains the most variation in our dataset.  
 
-We also set `tax_level='Genus'` to define the taxonomic level at which to group ASVs. Depending on the fidelity of the data/annotation, this value can be scaled all the way back to 'Phylum', but may not be informative at a wider scope. 
+We also set `tax_level='Phylum'` to define the taxonomic level at which to group ASVs. Depending on the fidelity of the data/annotation, this value can be scaled all the way back to 'Phylum', but may not be informative at a wider scope. 
 
-This operation is a well optimized piece of software, but we still need to take care to not overload our HPC with such a large dataset. The main concern is running near RAM limits, as holding a large ~45,000 x ~900 ASV matrix in memory is not optimal. Two parameters can be tuned to effectively limit the memory requirements: `prv_cut` which excludes ASVs below the stated prevalence threshold [0,1], making the matrix itself smaller. The other, `n_cl` controls the number of nodes to be forked during parallel processing. Each node here needs to do operations upon this matrix and pulls it into memory, so increasing this number can quickly balloon your RAM usage. 
+This operation is a well optimized piece of software, but we still need to take care to not overload our HPC with such a large dataset. The main concern is running near RAM limits, as holding a large ~45,000 x ~900 ASV matrix in memory is not optimal. Two parameters can be tuned to effectively limit the memory requirements: `prv_cut` which excludes ASVs below the stated prevalence threshold [0,1], making the matrix itself smaller. The other, `n_cl` controls the number of nodes to be forked during parallel processing. Each node here needs to do operations upon this matrix and pulls it into memory, so increasing this number can quickly balloon your RAM usage.
 
 
-```{r run-micro_time}
+```{r run-micro-ancombc}
 
-#run with Microhabitat+SampleDate to start
+#run with just microhabitat comparison to start
 out <- ancombc2(data = ps,
-               fix_formula='Microhabitat+SampleDate',
+               fix_formula='Treatment+SampleDate+Microhabitat',
                rand_formula = NULL,
                tax_level="Phylum",
                p_adj_method = 'holm',
                prv_cut = 0.1,
-               n_cl = 20,
-               group='Group',
+               n_cl = 12,
+               group='Microhabitat',
                pairwise = T,
                struc_zero = T,
                neg_lb = F)
 
 #save
-saveRDS('data/16Sancombc/ancombc.mh_time.out.rds')
+saveRDS(out, 'data/16Sancombc/ancombc.mh.out.rds')
 
 ```
 
-## Graph Significant Taxa
+## Make Volcano plots
+
+Visualize the significant taxa with some volcano plots. 
+
+```{r graph-volcanoes}
+
+res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p"))) 
+
+res_long <- res %>%
+  #rename implicit cols to make reference column explicit
+  rename_with(
+    ~{
+      x <- .x
+      term <- "Microhabitat"
+      ref <- "SG"
+      #ex: lfc_MicrohabitatSI  -> lfc_MicrohabitatSI_MicrohabitatSG
+      x <- str_replace(
+        x,
+        paste0("^(lfc|diff|p)_", term, "([A-Za-z0-9]+)$"),
+        paste0("\\1_", term, "\\2_", term, ref)
+      )
+
+      #clean up
+      x <- str_replace_all(x, paste0(term), "")
+      x <- str_replace(x, "^p_", "p_val_")
+
+      #return object
+      x
+    },
+    .cols = -taxon
+  ) %>%
+  #pivot longer for graphing purposes
+  pivot_longer(
+    cols = -taxon,
+    names_to = c(".value", "contrast"),
+    names_pattern = "^(lfc|diff|p_val)_(.+)$"
+  ) %>%
+  #clean up hanging chads
+  mutate(
+    contrast = str_replace_all(contrast, "^_", ""),  
+    contrast = str_replace_all(contrast, "__+", "_") 
+  )
+
+ggplot(res_long)+
+  geom_point(aes(x=lfc,y=-log10(p_val),color=diff))+
+  theme_bw()+
+  facet_wrap(~contrast)+
+  guides(color=guide_legend(title="significant") )+
+  scale_color_manual(values = c("darkgrey","red"))
+
+write_csv(res_long,'data/16Sancombc/ancombc_results_mh.csv')
+
+```
+
+## Significant taxa heatmaps
+
+We can see from many of our previous results that there is a much larger distinction between surface depth than there is between grass/interspace. For that reason, we focus in on comparisons between the same local microhabitat (G/I) that differ in depth (e.g. SSG_SG and SSI_SI). We use a heatmap to visualize the lfc scores across groups. We also print a table of structural zeroes identified between groups, which is useful for identifying indicator species. Interestingly, no species were identified as structural zeroes within the SSI group, meaning all identified organisms were found at least once in an SSI sample. It is important to note that becaue of `prv_cut=0.1`, all structural zeroes are species that have at least 10% prevalence in at least one sample, so rare taxa are not as well captured by this test.  
 
 
+```{r heatmaps}
+contrasts_keep <- c("SSI_SI", "SSG_SG")
+alpha <- 0.05
+sig_taxa <- res_long %>%
+  filter(contrast %in% contrasts_keep, !is.na(p_val), !is.na(diff)) %>%
+  filter(p_val < alpha) %>%
+  group_by(taxon) %>%
+  summarise(max_abs_lfc = max(abs(lfc), na.rm = TRUE), .groups = "drop") %>%
+  arrange(-max_abs_lfc) %>% 
+  head(n=20) %>% 
+  pull(taxon)
 
-```{r graph-micro}
+gdat <- res_long %>%
+  filter(taxon %in% sig_taxa) %>%
+  mutate(
+    sig = p_val < alpha,
+    taxon = fct_reorder(taxon, abs(lfc), .fun = max, .desc = F), #order by abs(lfc)
+    contrast = factor(contrast, levels=c("SI_SG","SSI_SSG","SSI_SI","SSG_SG","SSI_SG","SSG_SI"))
+  )
 
-out$res_pair %>% select(starts_with("diff")) %>% summarize_all(sum)
-gdat <- out$res_pair
-sigtaxs<-gdat %>% filter(diff_MicrohabitatCreosote|diff_MicrohabitatMariola|diff_MicrohabitatMesquite|diff_MicrohabitatTarbush) %>% pull(taxon)
-ggdat <- gdat %>% 
-  filter(taxon %in% sigtaxs) %>% 
-  group_by(taxon) %>% 
-  select(starts_with("lfc")) %>% 
-  pivot_longer(starts_with("lfc"),names_to='comparison', values_to = 'LFC') %>% 
-  mutate(comparison = sub("^lfc_", "", comparison)) %>% 
-  mutate(comparison= sub("*Shrub*","", comparison))%>% 
-  mutate(comparison= sub("*Shrub*","", comparison))
-
-glevs <- c("Creosote","Mariola", "Mesquite","Tarbush", "Mariola_Creosote", 
-           "Mesquite_Creosote", "Tarbush_Creosote",  "Mesquite_Mariola","Tarbush_Mariola","Tarbush_Mesquite" )
-
-ggdat <- ggdat %>% mutate(comparison=factor(comparison, levels=glevs))
-
-gg <- ggplot(ggdat)+
-  geom_tile(mapping=aes(x=comparison, y=taxon, fill=LFC))+
-  scale_fill_viridis_c(option='plasma')+
+ggplot(gdat %>% filter(contrast %in% c("SI_SG","SSI_SSG","SSI_SI","SSG_SG"))) +
+  geom_tile(aes(x = contrast, y = taxon, fill = lfc)) +
+  scale_fill_gradient2(low = "#FE504D",mid = "white", high = "#76FE9F", midpoint = 0)+
   theme_bw() +
-  theme(
-    text = element_text(size = 18),
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    panel.grid = element_blank(), 
-    panel.border = element_blank())+
+  theme(axis.text.y = element_text(size = 8)) +
+  labs(fill = "LFC")+
   xlab("")+
-  ylab("Taxon")
-gg
-ggsave('figs/Genus_lvl_heatmap.png', height=4000, width=4000, dpi=300, units='px')
+  ylab("Phylum")
+
+zeros <- out$zero_ind
+colnames(zeros) <- c('taxon','SG','SI','SSG','SSI')
+zeros %>% filter(SG|SI|SSG|SSI)
+
+```
+
+## Run ancombc2 treatment contrast
+
+Here we run the model to catch any differences in treatment. The large number of groups increases the number of tests that are performed, and narrows the sample size in each group, which makes statistical significance harder to reach. Because of this, fewer taxa are reported as significant, but we can still find usefulness in the order of their LFC scores and the structural zeroes that are identified. 
 
 
+```{r run-treat-ancombc}
+
+#run with just treatment comparison
+out <- ancombc2(data = ps,
+               fix_formula='Treatment+SampleDate+Microhabitat',
+               rand_formula = NULL,
+               tax_level="Phylum",
+               p_adj_method = 'holm',
+               prv_cut = 0.1,
+               n_cl = 12,
+               group='Treatment',
+               pairwise = T,
+               struc_zero = T,
+               neg_lb = F)
+
+#save
+saveRDS(out, 'data/16Sancombc/ancombc.treat.out.rds')
+
+```
+
+
+```{r graph-volcanoes-treat}
+
+res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p"))) 
+
+res_long <- res %>%
+  #rename implicit cols to make reference column explicit
+  rename_with(
+    ~{
+      x <- .x
+      term <- "Treatment"
+      ref <- "Baseline"
+      #ex: lfc_MicrohabitatSI  -> lfc_MicrohabitatSI_MicrohabitatSG
+      x <- str_replace(
+        x,
+        paste0("^(lfc|diff|p)_", term, "([A-Za-z0-9]+)$"),
+        paste0("\\1_", term, "\\2_", term, ref)
+      )
+
+      #clean up
+      x <- str_replace_all(x, paste0(term), "")
+      x <- str_replace(x, "^p_", "p_val_")
+
+      #return object
+      x
+    },
+    .cols = -taxon
+  ) %>%
+  #pivot longer for graphing purposes
+  pivot_longer(
+    cols = -taxon,
+    names_to = c(".value", "contrast"),
+    names_pattern = "^(lfc|diff|p_val)_(.+)$"
+  ) %>%
+  #clean up hanging chads
+  mutate(
+    contrast = str_replace_all(contrast, "^_", ""),  
+    contrast = str_replace_all(contrast, "__+", "_") 
+  )
+
+ggplot(res_long)+
+  geom_point(aes(x=lfc,y=-log10(p_val),color=diff))+
+  theme_bw()+
+  facet_wrap(~contrast)+
+  guides(color=guide_legend(title="significant") )+
+  scale_color_manual(values = c("darkgrey","red"))
+
+write_csv(res_long,'data/16Sancombc/ancombc_results_treat.csv')
+
+```
+## Treatment significant taxa and structural zeroes
+
+Since the treatment category has so many variables, almost nothing is significant. However one phyla, Bacteria_Deinococcota, is significantly enriched when comparing Nitrogen to Water treatments. There are some structural zeroes that are interesting as well, particularly Archaea_Aenigmarchaeota which only shows up in treatments containing both water and phosphorous. Bacteria_Cloacimonadota, Archaea_Methanobacteriota, and Bacteria_Rs-K70 termite group only show up in the phosphorous-only treatment, and Bacteria_Hydrogenedentes was absent only from the phosphorous-only treatments. The number of structural zeroes in each treatment group is also calculated, with the highest number identified in N+Water treatment groups. 
+
+```{r treatment-sig-taxa}
+res_long %>% filter(diff)
+
+zeros <- out$zero_ind 
+colnames(zeros) <- c('taxon','Control','N','N+P','N+P+Water','N+Water','P','P+Water','Water')
+zeros %>% filter(Control|N|N+P|N+P+Water|N+Water|P|P+Water|Water)
+colSums(zeros[2:length(zeros)])
 ```
 

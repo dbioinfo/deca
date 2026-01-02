@@ -7,3 +7,4 @@ deca_db/*
 singularity/*
 sock/*
 .Rhistory
+src/.Rhistory
