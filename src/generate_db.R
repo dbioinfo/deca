@@ -46,8 +46,22 @@ dbExecute(con, 'DROP TABLE IF EXISTS mirl;')
 for (i in 1:length(mirl)){
   tmp <- data.frame(otu_table(mirl[[i]]))
   tmp$rep <- i
+  tmp$ASV <- rownames(tmp)
   dbWriteTable(con, 'mirl', tmp, append=T)
   print(i)
 }
+dbExecute(con, 'CREATE INDEX IF NOT EXISTS idx_mirl ON mirl ("ASV", "rep")')
+mir <- tbl(con, 'mirl')
 
-
+#add the average table
+sample_cols <- setdiff(tbl_vars(mir), c("ASV", "rep"))
+mirl_avg <-  mir %>% 
+  group_by(ASV) %>%
+  summarise(
+    across(all_of(sample_cols), ~ mean(.x), .names = "{.col}"),
+    .groups = "drop"
+  )
+mirl_avg_final <- mirl_avg %>%
+  compute(name = "mirl_avg", temporary = FALSE)
+dbListTables(conn = con)
+dbExecute(con, 'CREATE INDEX IF NOT EXISTS idx_mirl_avg ON mirl_avg ("ASV")')

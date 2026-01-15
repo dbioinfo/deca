@@ -1,0 +1,106 @@
+---
+title: "deca_16S_faprotax"
+author: "Dylan Barth"
+date: "2026-01-06"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(dada2)
+library(file2meco)
+library(phyloseq)
+library(microeco)
+library(ComplexHeatmap)
+library(circlize)
+library(scales)  
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
+```
+
+## Import data
+
+Here we import the otu table and prepare the data for annotation. Then we call the annotation using FAPROTAX. 
+
+```{r import}
+ps <- readRDS('data/16Sdada2/phyloseq.filtered.rds')
+otu <- data.frame(otu_table(ps))
+meta <- data.frame(sample_data(ps))
+
+data <- phyloseq2meco(ps)
+tf <- trans_func$new(data)
+tf$cal_spe_func(prok_database = "FAPROTAX")
+tf$cal_spe_func_perc(abundance_weighted = FALSE) 
+
+head(tf$res_spe_func_perc)
+
+```
+
+## Sort and graph data
+
+Identify enriched groups and graph them on a heatmap.
+
+```{r heatmap-1}
+gdat <- tf$res_spe_func_perc
+gdat <- gdat[which(colSums(gdat)>10)]
+mat <- t(as.matrix(gdat))
+mat[is.na(mat)] <- 0  
+zmat <- t(scale(t(mat))) 
+
+mhab_levels <- unique(meta$Microhabitat)
+mhab_cols   <- c(SI="#B897DD",SG="#BCDD97",SSI="#B43FEE",SSG="#78EE3F")
+treat_levels <- unique(meta$Treatment)
+treat_cols <-  c("Baseline"="#E3E571",
+                    "Control"="#E5AE71",
+                    "Water"="#71C4E5",
+                    "N"="#53DF7B",
+                    "N+P"="#C0E5A4",
+                    "N+Water"="#BCE7D6",
+                    "P"= "#DF53B7",
+                    "P+Water"="#E7BCCC",
+                    "N+P+Water"="#804DEF")
+
+meta <- meta %>% mutate(Microhabitat=factor(Microhabitat, levels=names(mhab_cols)),
+                        Treatment=factor(Treatment, levels=names(treat_cols)))
+ord <- order(meta$Microhabitat, meta$Treatment)
+m2   <- meta[ord, , drop = FALSE]
+ha <- HeatmapAnnotation(
+  Microhabitat = anno_block(
+    labels = levels(m2$Microhabitat),
+    labels_gp = gpar(fontsize = 10)
+  ),
+  Treatment = m2$Treatment,
+  col = list(Microhabitat = mhab_cols, Treatment=treat_cols),
+  annotation_name_side = "left"
+)
+
+col_fun <- colorRamp2(c(min(zmat), 0, max(zmat)), colors=c("#33857B","#f0f0f0", "#67000d"))
+
+ht <- Heatmap(
+  zmat[,ord,drop=F],
+  name                 = "% FAPROTAX",
+  top_annotation       = ha,
+  col                  = col_fun,
+  column_split = mh[ord],
+  clustering_method_rows    = "ward.D2",
+  clustering_method_columns = "ward.D2",
+  show_column_names    = FALSE,
+  cluster_columns = F,
+  cluster_column_slices = F,
+  row_title            = "",
+  column_title         = "Samples",
+  heatmap_legend_param = list(title = "Relative Abundance")
+)
+
+ht
+
+
+png("figs/faprotax_heatmap.png", width = 5000, height = 3000, res = 300)
+draw(ht, merge_legends = TRUE)
+dev.off()
+
+```
+
+
+

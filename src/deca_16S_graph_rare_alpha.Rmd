@@ -1,0 +1,88 @@
+---
+title: "deca_16S_graph_rare_alpha"
+author: "Dylan Barth"
+date: "2026-01-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(colorspace)
+library(phyloseq)
+library(ggh4x)
+library(DBI)
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
+```
+
+## Initialize connection
+
+Here we utilize the database of rarefied OTU tables we created with mirlyn. To conserve RAM, the database was stored in PSQL. We pull the averaged data out here for graphing. Ensure the database is installed and running on your system before running this code. 
+
+```{r init-db}
+con <- dbConnect(
+  RPostgres::Postgres(),
+  dbname = "deca_db",
+  host   = "127.0.0.1",
+  port   = 1738,
+  user   = 'postgres' )
+
+meta <- data.frame(tbl(con, 'meta'))
+otu <- data.frame(tbl(con, 'mirl_avg'))
+
+otu <- otu[,setdiff( colnames(otu),c('STANDARD_1_S162') )] #remove control sample
+
+```
+
+## Calculate alpha indices
+
+Next we calculate each of the metrics we are interested in, these are Richness, Evenness, Shannon and Simpson alpha indices. 
+
+```{r alphas}
+
+rich <- vegan::specnumber(t(otu[2:length(otu)]))
+shan <- vegan::diversity(t(otu[2:length(otu)]), index = 'shannon')
+simp <- vegan::diversity(t(otu[2:length(otu)]), index = 'simpson')
+peven <- shan / log(rich)
+
+```
+
+
+## Generate graph
+
+
+```{r graph-alphas}
+gdat <- left_join(meta,  data.frame(richness=rich, Sample=names(rich)), by='Sample')
+gdat <- left_join(gdat,  data.frame(shannon=shan, Sample=names(shan)), by='Sample')
+gdat <- left_join(gdat,  data.frame(simpson=simp, Sample=names(simp)), by='Sample')
+gdat <- left_join(gdat,  data.frame(evenness=peven, Sample=names(peven)), by='Sample')
+
+gdat <- gdat %>% group_by(Sample) %>% pivot_longer(cols = c(richness, shannon, simpson, evenness), names_to = 'metric', values_to = 'Alpha')
+
+treatcols <- c("#E5AE71","#71C4E5","#53DF7B","#C0E5A4","#BCE7D6","#DF53B7","#E7BCCC","#804DEF")
+treatlevs <- c("Control","Water","N", "N+P","N+Water","P","P+Water","N+P+Water")
+timelevs <- c("Nov_2022","Feb_2023", "Aug_2023","Nov_2023", "Feb_2024","Aug_2024")
+mshapes <- c(17,16)
+
+gdat <- gdat %>% filter(SampleDate!='Jul_2022', Microhabitat %in% c("SI","SG","SSI","SSG")) 
+gdat <- gdat %>% mutate(SampleDate=factor(SampleDate, levels=timelevs), 
+                        Treatment=factor(Treatment, levels=treatlevs), 
+                        Microhabitat = factor(Microhabitat, levels= c("SI","SG","SSI","SSG")))
+#gdat2 <- gdat %>% filter(Treatment=='Control') %>% group_by()
+
+g1 <- ggplot(gdat)+
+  #geom_jitter(aes(x=SampleDate, y=Alpha, color=Treatment, shape=Grass_Interspace), height=0, width=0.4)+
+  geom_boxplot(aes(x=SampleDate, y=Alpha, fill=Treatment))+
+  facet_grid2(Microhabitat~metric, scales='free', independent='all',switch = 'y')+
+  scale_fill_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  theme_bw()+
+  theme(text = element_text(size=15),
+        axis.text.x = element_text(angle = 45, vjust=.9, hjust=.9))
+
+ggsave('figs/mirl_alpha_boxplot.png', g1, width = 7000, height=4000 ,units='px')
+
+g1
+
+```
+
