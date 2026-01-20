@@ -117,19 +117,19 @@ ui <- fluidPage(
 
       uiOutput("func_inclusion_ui"),
 
-      checkboxGroupInput(
-        "meta_axes", "Metadata Axis",
-        choices = all_meta_axes, selected = "Microhabitat"
+      fluidRow(
+        column(width = 6,
+          checkboxGroupInput("meta_axes", "Metadata Axis",choices = all_meta_axes, selected = "Microhabitat")
+        ),
+        column(width = 6,
+          uiOutput("meta_filter_ui"),
+          textInput("plot_title", "Plot title", value = "")
+        )
       ),
-      uiOutput("meta_filter_ui"),
 
-      sliderInput(
-        "weight_cutoff_log10", "Weight Cutoff (log10 scale)",
-        min = -3, max = 1, value = -1, step = 0.05
-    ),
-      checkboxInput(
-        "use_enrichment", "Weight by FAPROTAX enrichment score", value = TRUE
-    ),
+      uiOutput("weight_range_ui"),
+      
+      checkboxInput("use_enrichment", "Weight by FAPROTAX enrichment score", value = TRUE),
       actionButton("refresh", "Refresh", class = "btn-primary")
     ),
     
@@ -183,6 +183,16 @@ server <- function(input, output, session) {
     }))
   })
 
+  output$weight_range_ui <- renderUI({
+
+    sliderInput("weight_range_log10", "Weight range (log10)",
+      min = -5,
+      max = 2,
+      value = c(1e-3, 1),
+      step = 0.05
+    )
+  })
+  
   ###Build plot on Refresh
   plot_dat <- eventReactive(input$refresh, {
   req(input$f_groups, input$tax_ranks, input$func_vars)
@@ -216,18 +226,21 @@ server <- function(input, output, session) {
     #X axis
     axis_cols <- c(axes, "group", "variable", "tax")
 
-    #calculate final data
+    #weight filters
+    lowpass <- 10^input$weight_range_log10[1]
+    highpass <- 10^input$weight_range_log10[2]
+    
     #weight by enrich score? 
     if (input$use_enrichment){ #(sum of rel abund) x enrichment score from faprotax
       dat <- dat %>% 
         dplyr::group_by(dplyr::across(dplyr::all_of(axis_cols))) %>% 
         dplyr::summarize(weight = sum(Abundance*value, na.rm = TRUE), .groups = "drop") %>% 
-        dplyr::filter(weight >= 10^input$weight_cutoff_log10)
+        dplyr::filter(weight >= lowpass, weight <= highpass)
     } else { #just relative abundance
       dat <- dat %>% 
         dplyr::group_by(dplyr::across(dplyr::all_of(axis_cols))) %>% 
         dplyr::summarize(weight = sum(Abundance, na.rm = TRUE), .groups = "drop") %>% 
-        dplyr::filter(weight >= 10^input$weight_cutoff_log10)
+        dplyr::filter(weight >= lowpass, weight <= highpass)
     }
     
     list(dat = dat, axis_cols = axis_cols, fill_var = fill_var)
@@ -241,9 +254,14 @@ server <- function(input, output, session) {
 
     #X axis
     axis_cols <- obj$axis_cols
-
+    #fill
     fill_var <- if (!is.null(obj$fill_var)) obj$fill_var else "variable"
-
+    #title
+    title_txt <- input$plot_title
+    if (is.null(title_txt) || !nzchar(title_txt)) {
+      title_txt <- paste("Alluvial:", paste(input$f_groups, collapse = ", "))
+    }
+        
     #Build aes 
     axis_aes <- setNames(
       lapply(axis_cols, rlang::sym),
@@ -262,7 +280,7 @@ server <- function(input, output, session) {
       scale_x_discrete(limits = axis_cols) +
       theme_bw() +
       theme(axis.text = element_text(size=15))+
-      ggtitle(paste("Alluvial:", paste(input$f_groups, collapse = ", ")))
+      ggtitle(title_txt)
 
     # Manual fill scales based on chosen fill variable
     if (fill_var == "Treatment") {

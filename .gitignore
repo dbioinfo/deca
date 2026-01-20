@@ -8,3 +8,4 @@ singularity/*
 sock/*
 .Rhistory
 src/.Rhistory
+shipping_container*
