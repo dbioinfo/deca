@@ -1,0 +1,248 @@
+---
+title: "deca_16S_ancombc_eda.Rmd"
+author: "Dylan Barth"
+date: "2026-01-20"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(dada2)
+library(phyloseq)
+library(circlize)
+library(scales)  
+library(shiny)
+library(ggalluvial)
+library(rlang)
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
+```
+
+
+```{r prep-data}
+out <- readRDS('data/16Sancombc/ancombc.mh.out.rds')
+res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) 
+
+variables <- c("Microhabitat","Treatment","Surface_Subsurface")
+
+gdat <- data.frame()
+for (ivar in variables){
+  
+  #handle each var 
+  if (ivar=='Microhabitat') { iref <- "SG"; out <- readRDS('data/16Sancombc/ancombc.mh.out.rds') } else 
+  if (ivar=="Treatment") { iref <- "Control"; out <- readRDS('data/16Sancombc/ancombc.treat.out.rds')} else 
+  if (ivar=="Surface_Subsurface") {iref <- "S"; out <- readRDS('data/16Sancombc/ancombc.ss.out.rds')}
+  
+  if (ivar %in% c("Surface_Subsurface","Grass_Interspace")) { #handle vars with 2 levels
+    res <- out$res %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) %>%  
+      select(contains(c("taxon","Surface_Subsurface")))
+  } else {
+    res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) 
+  }
+  
+  res_long <- res %>% #rename implicit cols to make reference column explicit
+    rename_with( ~{ 
+        x <- .x
+        term <- ivar #category
+        ref <- iref #reference condition
+        #ex: lfc_MicrohabitatSI  -> lfc_MicrohabitatSI_MicrohabitatSG
+        x <- str_replace(x,
+          paste0("^(lfc|diff|p|W)_", term, "([A-Za-z0-9]+)$"),
+          paste0("\\1_", term, "\\2_", term, ref))
+  
+        #clean up
+        x <- str_replace_all(x, paste0(term), "")
+        x <- str_replace(x, "^p_", "p_val_")
+  
+        x
+      } , .cols = -taxon) %>%
+    #pivot longer for graphing
+    pivot_longer(cols = -taxon,
+      names_to = c(".value", "contrast"),
+      names_pattern = "^(lfc|diff|p_val|W)_(.+)$") %>%
+    #clean up, add variable column
+    mutate(contrast = str_replace_all(contrast, "^_", ""),  
+      contrast = str_replace_all(contrast, "__+", "_"), 
+      variable=ivar)
+  
+  gdat <- rbind(gdat, res_long)
+}
+
+```
+
+```{r single_bubble}
+
+dat <- gdat %>% filter(variable=='Microhabitat') 
+taxorder <- dat %>% group_by(taxon) %>% summarize(lfc=sum(lfc)) %>% arrange(lfc) %>% pull(taxon) %>% unique()
+dat <- gdat %>% mutate(taxon = factor(taxon, levels=taxorder))
+ggplot(dat, aes(x = contrast, y = taxon)) +
+  geom_point(aes(size = abs(lfc), fill = lfc), shape = 21, color = "black", alpha = 0.9) +
+  scale_size_continuous(name = "|LFC|", range = c(1.5, 10)) +
+  scale_fill_gradient2(name = "LFC", midpoint = 0, transform = 'reverse') +
+  labs(x = "Contrast", y = "Phylum") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_grid(~variable, scales = "free_x", space='free_x')
+
+```
+
+
+
+```{r shiny-bubble, echo=FALSE, message=FALSE, warning=FALSE}
+
+# ---- UI ----
+all_tax_ranks <- c("Phylum") #c("Kingdom","Phylum","Class","Order","Family","Genus","Species") #Genus
+all_meta_axes <- c("Microhabitat","Treatment","Surface_Subsurface") #,"Grass_Interspace","SampleDate")
+
+ui <- fluidPage(
+  titlePanel("ANCOMBC2 Bubble Plots"),
+  sidebarLayout(
+    sidebarPanel(
+      selectizeInput(
+        "meta_vars", "Metadata variables", 
+        selected = all_meta_axes, choices = all_meta_axes, multiple=T,
+        options = list(plugins = list("remove_button"))
+      ),
+
+      selectizeInput(
+        "row_order_var", "Metadata variable to order rows by", 
+        selected = "Microhabitat", choices = all_meta_axes,
+        options = list(plugins = list("remove_button"))
+      ),
+      
+      selectizeInput(
+        "tax_rank", "Taxonomic Scope",
+        choices = all_tax_ranks, selected = "Phylum",
+        options = list(plugins = list("remove_button"))
+      ),
+      
+      
+
+      textInput("plot_title", "Plot title", value = ""),
+
+      
+      sliderInput("scale_filter_range", "Filter LFC (Select range to filter out; low/highpass)",
+        min = -3, max = 3,value = c(-1, 1), step = 0.05),
+      
+      sliderInput("scale_filter_band", "Filter LFC (Select range to filter in; bandpass)",
+        min = round(min(gdat$lfc), 2), 
+        max = round(max(gdat$lfc),2) ,value = c( round(min(gdat$lfc), 2), round(max(gdat$lfc), 2)), step = 0.05),
+      
+      fluidRow(
+        column(6, actionButton("refresh", "Refresh", class = "btn-primary")),
+        column(6, downloadButton("save_plot", "Save figure"))
+      )
+    ),
+    
+    mainPanel(
+      plotOutput("bubble_plot", width="1250px", height = "750px")
+    )
+  )
+)
+
+#--- SERVER ---
+server <- function(input, output, session) {
+
+  ###Generate the UI on the backend
+  
+  
+  
+  ###Build plot on Refresh
+  plot_dat <- eventReactive(input$refresh, {
+    req(input$meta_vars, input$tax_rank, input$row_order_var, input$scale_filter_range)
+    rovar <- input$row_order_var
+    
+    #filter by metadata vars
+    mvars <- input$meta_vars
+    dat <- gdat %>% filter(variable %in% mvars)
+    
+    #taxon order
+    tdat <- gdat %>% filter(variable==input$row_order_var) 
+    taxorder <- tdat %>% group_by(taxon) %>% summarize(lfc=sum(lfc)) %>% arrange(lfc) %>% pull(taxon) %>% unique()
+    dat <- dat %>% 
+      mutate(taxon = factor(taxon, levels=taxorder)) 
+
+    #lowpass/highpass
+    lowpass <- input$scale_filter_range[1]
+    highpass <- input$scale_filter_range[2]
+    tax_filt <- dat %>% 
+      filter(variable==rovar) %>% 
+      group_by(taxon) %>% 
+      summarize(maxlfc=max(lfc), minlfc=min(lfc)) %>% 
+      filter(minlfc <= lowpass | maxlfc >= highpass) %>% 
+      pull(taxon) %>% unique()
+    dat <- dat %>% filter(taxon %in% tax_filt)
+    
+    #bandpass
+    lband <- input$scale_filter_band[1]
+    hband <- input$scale_filter_band[2]
+    print(input$scale_filter_band)
+    tax_filt <- dat %>%
+      filter(variable==rovar) %>% 
+      group_by(taxon) %>% 
+      summarize(maxlfc=max(lfc), minlfc=min(lfc)) %>% 
+      filter(minlfc >= lband & maxlfc <= hband) %>% 
+      pull(taxon) %>% unique()
+    dat <- dat %>% filter(taxon %in% tax_filt)
+
+    list(dat=dat)
+    
+  }, ignoreNULL = FALSE)
+
+  mainplot <- eventReactive(input$refresh, { #generate plot on refresh
+    obj <- plot_dat()
+    dat <- obj$dat
+    
+    validate(shiny::need(nrow(dat) > 0, "No data after filters."))
+
+    #X axis
+    axis_cols <- obj$axis_cols
+    #fill
+    fill_var <- if (!is.null(obj$fill_var)) obj$fill_var else "variable"
+    #title
+    title_txt <- input$plot_title
+    if (is.null(title_txt) || !nzchar(title_txt)) {
+      title_txt <- paste("Bubble Plot:", paste(input$f_groups, collapse = ", "))
+    }
+     
+    #Plot
+    p <- ggplot(dat, aes(x = contrast, y = taxon)) +
+      geom_point(aes(size = abs(lfc), fill = lfc), shape = 21, color = "black", alpha = 0.9) +
+      scale_size_continuous(name = "|LFC|", range = c(1.5, 10)) +
+      scale_fill_gradient2(name = "LFC", midpoint = 0, transform = 'reverse') +
+      labs(x = "Contrast", y = input$tax_rank) +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1),
+            text = element_text(size=15)) +
+      facet_grid(~variable, scales = "free_x", space='free_x')+
+      ggtitle(title_txt)
+
+
+    p
+  })
+  
+  output$bubble_plot <- renderPlot({
+    mainplot()
+  })
+  
+  output$save_plot <- downloadHandler(
+    filename = function() {
+      nm <- input$plot_title
+      if (is.null(nm) || !nzchar(nm)) nm <- "bubble_plot"
+      nm <- gsub("[^A-Za-z0-9_-]+", "_", nm)
+      paste0(nm, ".png")
+    },
+    content = function(file) {
+      ggsave(file, plot = mainplot(), width=5000, height = 3000, units='px')
+    }
+  )
+  
+  
+}
+
+shinyApp(ui, server)
+```
+
+
+

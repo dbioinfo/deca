@@ -130,7 +130,10 @@ ui <- fluidPage(
       uiOutput("weight_range_ui"),
       
       checkboxInput("use_enrichment", "Weight by FAPROTAX enrichment score", value = TRUE),
-      actionButton("refresh", "Refresh", class = "btn-primary")
+      fluidRow(
+        column(6, actionButton("refresh", "Refresh", class = "btn-primary")),
+        column(6, downloadButton("save_plot", "Save figure"))
+      )
     ),
     
     mainPanel(
@@ -247,7 +250,7 @@ server <- function(input, output, session) {
     
   }, ignoreNULL = FALSE)
 
-  output$alluvial_plot <- renderPlot({
+  mainplot <- eventReactive(input$refresh, { #generate plot on refresh
     obj <- plot_dat()
     dat <- obj$dat
     validate(shiny::need(nrow(dat) > 0, "No data after filters."))
@@ -279,7 +282,9 @@ server <- function(input, output, session) {
       ) +
       scale_x_discrete(limits = axis_cols) +
       theme_bw() +
-      theme(axis.text = element_text(size=15))+
+      theme(axis.text = element_text(size=15), 
+            title = element_text(size=18))+
+      ylab("Weight")+
       ggtitle(title_txt)
 
     # Manual fill scales based on chosen fill variable
@@ -297,6 +302,24 @@ server <- function(input, output, session) {
 
     p
   })
+  
+  output$alluvial_plot <- renderPlot({
+    mainplot()
+  })
+  
+  output$save_plot <- downloadHandler(
+    filename = function() {
+      nm <- input$plot_title
+      if (is.null(nm) || !nzchar(nm)) nm <- "alluvial_plot"
+      nm <- gsub("[^A-Za-z0-9_-]+", "_", nm)
+      paste0(nm, ".png")
+    },
+    content = function(file) {
+      ggsave(file, plot = mainplot(), width=5000, height = 3000, units='px')
+    }
+  )
+  
+  
 }
 
 shinyApp(ui, server)

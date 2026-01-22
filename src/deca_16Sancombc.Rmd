@@ -75,7 +75,7 @@ Visualize the significant taxa with some volcano plots.
 
 ```{r graph-volcanoes}
 
-res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p"))) 
+res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) 
 
 res_long <- res %>%
   #rename implicit cols to make reference column explicit
