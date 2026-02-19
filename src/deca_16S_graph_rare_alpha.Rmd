@@ -11,6 +11,7 @@ library(colorspace)
 library(phyloseq)
 library(ggh4x)
 library(DBI)
+library(picante)
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
 ```
@@ -32,6 +33,8 @@ otu <- data.frame(tbl(con, 'mirl_avg'))
 
 otu <- otu[,setdiff( colnames(otu),c('STANDARD_1_S162') )] #remove control sample
 
+
+ps <- readRDS("data/16Sdada2/phyloseq.filtered.tree.rds")
 ```
 
 ## Calculate alpha indices
@@ -45,6 +48,10 @@ shan <- vegan::diversity(t(otu[2:length(otu)]), index = 'shannon')
 simp <- vegan::diversity(t(otu[2:length(otu)]), index = 'simpson')
 peven <- shan / log(rich)
 
+rownames(otu) <- otu$ASV
+tmp <- t(otu[,2:length(otu)])
+faith <- pd(tmp, phy_tree(ps), include.root = F)
+
 ```
 
 
@@ -56,8 +63,9 @@ gdat <- left_join(meta,  data.frame(richness=rich, Sample=names(rich)), by='Samp
 gdat <- left_join(gdat,  data.frame(shannon=shan, Sample=names(shan)), by='Sample')
 gdat <- left_join(gdat,  data.frame(simpson=simp, Sample=names(simp)), by='Sample')
 gdat <- left_join(gdat,  data.frame(evenness=peven, Sample=names(peven)), by='Sample')
+gdat <- left_join(gdat, data.frame(faith=faith$PD, Sample=rownames(faith)), by="Sample")
 
-gdat <- gdat %>% group_by(Sample) %>% pivot_longer(cols = c(richness, shannon, simpson, evenness), names_to = 'metric', values_to = 'Alpha')
+gdat <- gdat %>% group_by(Sample) %>% pivot_longer(cols = c(richness, shannon, simpson, evenness, faith), names_to = 'metric', values_to = 'Alpha')
 
 treatcols <- c("#E5AE71","#71C4E5","#53DF7B","#C0E5A4","#BCE7D6","#DF53B7","#E7BCCC","#804DEF")
 treatlevs <- c("Control","Water","N", "N+P","N+Water","P","P+Water","N+P+Water")

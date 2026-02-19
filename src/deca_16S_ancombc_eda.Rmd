@@ -21,59 +21,74 @@ knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
 
 
 ```{r prep-data}
-out <- readRDS('data/16Sancombc/ancombc.mh.out.rds')
-res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) 
-
-variables <- c("Microhabitat","Treatment","Surface_Subsurface")
+itaxlevs <- c("phylum","genus")
+variables <- c("Microhabitat","Treatment","Surface_Subsurface","Grass_Interspace","SampleDate")
 
 gdat <- data.frame()
 for (ivar in variables){
-  
-  #handle each var 
-  if (ivar=='Microhabitat') { iref <- "SG"; out <- readRDS('data/16Sancombc/ancombc.mh.out.rds') } else 
-  if (ivar=="Treatment") { iref <- "Control"; out <- readRDS('data/16Sancombc/ancombc.treat.out.rds')} else 
-  if (ivar=="Surface_Subsurface") {iref <- "S"; out <- readRDS('data/16Sancombc/ancombc.ss.out.rds')}
-  
-  if (ivar %in% c("Surface_Subsurface","Grass_Interspace")) { #handle vars with 2 levels
-    res <- out$res %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) %>%  
-      select(contains(c("taxon","Surface_Subsurface")))
-  } else {
-    res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) 
+    
+    #handle each var 
+    loadpath <- 'data/16Sancombc/ancombc_results'
+    if (ivar=='Microhabitat') { iref <- "SI"; ipath <- 'mh' } else 
+    if (ivar=="Treatment") { iref <- "Control"; ipath <- 'treat'} else 
+    if (ivar=="Surface_Subsurface") {iref <- "S"; ipath <- 'ss'} else 
+    if (ivar=="Grass_Interspace") {iref <- "I"; ipath <- 'gi'} else
+    if (ivar=="SampleDate") {iref <- "Jul_2022"; ipath <- 'date'}
+    
+    
+    #iter through taxlevs
+    for (itax in itaxlevs){
+    
+      out <- readRDS(paste0( paste(loadpath, ipath, itax, sep = '_'), '.rds')  )
+      
+      
+      if (ivar %in% c("Surface_Subsurface","Grass_Interspace")) { #handle vars with 2 levels
+        res <- out$res %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) %>%  
+          select(contains(c("taxon",ivar)))
+      } else {
+        res <- out$res_pair %>% select(starts_with(c('tax',"lfc","diff", "p","W"))) 
+      }
+      
+      res_long <- res %>% #rename implicit cols to make reference column explicit
+        rename_with( ~{ 
+            x <- .x
+            term <- ivar #category
+            ref <- iref #reference condition
+            #ex: lfc_MicrohabitatSI  -> lfc_MicrohabitatSI_MicrohabitatSG
+            
+            #special handle for dates
+            if (term=='SampleDate') {
+              lvl_pat <- "(?![A-Za-z]{3}_\\d{4}_[A-Za-z]{3}_\\d{4}$)([^_]+(?:_[^_]+)?)$"
+              } else lvl_pat <- "([A-Za-z0-9]+)"
+            
+            x <- str_replace(x,
+              paste0("^(lfc|diff|p|W)_", term, "(?!.*_", term, ref, "$)", lvl_pat),
+              paste0("\\1_", term, "\\2_", term, ref))
+            #clean up
+            x <- str_replace_all(x, paste0(term), "")
+            x <- str_replace(x, "^p_", "p_val_")
+      
+            x
+          } , .cols = -taxon) %>%
+        #pivot longer for graphing
+        pivot_longer(cols = -taxon,
+          names_to = c(".value", "contrast"),
+          names_pattern = "^(lfc|diff|p_val|W)_(.+)$") %>%
+        #clean up, add variable column
+        mutate(contrast = str_replace_all(contrast, "^_", ""),  
+          contrast = str_replace_all(contrast, "__+", "_"), 
+          variable=ivar,
+          tax=itax) 
+      
+      gdat <- rbind(gdat, res_long)
   }
-  
-  res_long <- res %>% #rename implicit cols to make reference column explicit
-    rename_with( ~{ 
-        x <- .x
-        term <- ivar #category
-        ref <- iref #reference condition
-        #ex: lfc_MicrohabitatSI  -> lfc_MicrohabitatSI_MicrohabitatSG
-        x <- str_replace(x,
-          paste0("^(lfc|diff|p|W)_", term, "([A-Za-z0-9]+)$"),
-          paste0("\\1_", term, "\\2_", term, ref))
-  
-        #clean up
-        x <- str_replace_all(x, paste0(term), "")
-        x <- str_replace(x, "^p_", "p_val_")
-  
-        x
-      } , .cols = -taxon) %>%
-    #pivot longer for graphing
-    pivot_longer(cols = -taxon,
-      names_to = c(".value", "contrast"),
-      names_pattern = "^(lfc|diff|p_val|W)_(.+)$") %>%
-    #clean up, add variable column
-    mutate(contrast = str_replace_all(contrast, "^_", ""),  
-      contrast = str_replace_all(contrast, "__+", "_"), 
-      variable=ivar)
-  
-  gdat <- rbind(gdat, res_long)
 }
 
 ```
 
 ```{r single_bubble}
 
-dat <- gdat %>% filter(variable=='Microhabitat') 
+dat <- gdat %>% filter(variable=='Microhabitat', tax=='phylum')
 taxorder <- dat %>% group_by(taxon) %>% summarize(lfc=sum(lfc)) %>% arrange(lfc) %>% pull(taxon) %>% unique()
 dat <- gdat %>% mutate(taxon = factor(taxon, levels=taxorder))
 ggplot(dat, aes(x = contrast, y = taxon)) +
@@ -92,8 +107,8 @@ ggplot(dat, aes(x = contrast, y = taxon)) +
 ```{r shiny-bubble, echo=FALSE, message=FALSE, warning=FALSE}
 
 # ---- UI ----
-all_tax_ranks <- c("Phylum") #c("Kingdom","Phylum","Class","Order","Family","Genus","Species") #Genus
-all_meta_axes <- c("Microhabitat","Treatment","Surface_Subsurface") #,"Grass_Interspace","SampleDate")
+all_tax_ranks <- c("Phylum","Genus") #c("Kingdom","Phylum","Class","Order","Family","Genus","Species") #Genus
+all_meta_axes <- c("Microhabitat","Treatment","Surface_Subsurface","Grass_Interspace","SampleDate")
 
 ui <- fluidPage(
   titlePanel("ANCOMBC2 Bubble Plots"),
@@ -158,7 +173,9 @@ server <- function(input, output, session) {
     dat <- gdat %>% filter(variable %in% mvars)
     
     #taxon order
-    tdat <- gdat %>% filter(variable==input$row_order_var) 
+    print(input$tax_rank)
+    print( gdat %>% filter(variable==input$row_order_var, tax==tolower(input$tax_rank)))
+    tdat <- gdat %>% filter(variable==input$row_order_var, tax==tolower(input$tax_rank)) 
     taxorder <- tdat %>% group_by(taxon) %>% summarize(lfc=sum(lfc)) %>% arrange(lfc) %>% pull(taxon) %>% unique()
     dat <- dat %>% 
       mutate(taxon = factor(taxon, levels=taxorder)) 
@@ -169,7 +186,7 @@ server <- function(input, output, session) {
     tax_filt <- dat %>% 
       filter(variable==rovar) %>% 
       group_by(taxon) %>% 
-      summarize(maxlfc=max(lfc), minlfc=min(lfc)) %>% 
+      summarize(maxlfc=max(lfc, na.rm = T), minlfc=min(lfc, na.rm = T)) %>% 
       filter(minlfc <= lowpass | maxlfc >= highpass) %>% 
       pull(taxon) %>% unique()
     dat <- dat %>% filter(taxon %in% tax_filt)
@@ -205,6 +222,9 @@ server <- function(input, output, session) {
     if (is.null(title_txt) || !nzchar(title_txt)) {
       title_txt <- paste("Bubble Plot:", paste(input$f_groups, collapse = ", "))
     }
+    
+    #remove NA
+    dat <- dat %>% filter(!is.na(taxon))
      
     #Plot
     p <- ggplot(dat, aes(x = contrast, y = taxon)) +

@@ -30,19 +30,20 @@ meta <- data.frame(sample_data(ps))
 
 Adonis2 is a package that implements PERMANOVA on a distance matrix. We utilize the previously created distance matrix here and test the independent variables within Microhabitat, Time, and Treatment for differences in centroids within this structure. While it is useful to check if the means of groups differ, it is also of importance to infer differences of variance which often drive significant results in adonis2. 
 
-When running adonis2 using the argument `by='term'` calculates a statistical test in which the order of the variables in the model matters. For that reason, the test is run without interactions two times, forward and backward to account for any discrepancies that come about due to order. We find that regardless of the model order, the same order of importance is assigned to each of the measured variables. 
+When running adonis2 using the argument `by='term'` calculates a statistical test in which the order of the variables in the model matters. For that reason, the test is run without interactions two times, forward and backward to account for any discrepancies that come about due to order. We find that regardless of the model order, the same order of importance is assigned to each of the measured variables. In order of their `F-scores` the variables are `Surface_Subsurface` `SampleDate` `Grass_Interspace` and `Treatment`.
 
 Lastly, checking for within-group differences in dispersion allows us to decide whether or not the results in the PERMANOVA test can be interpreted simply. If differences occur in dispersion, the direct effect of differences in mean can be masked. However, differences in dispersion also tell us that two groups behave differently, suggesting it may be simpler to analyze them separately. From this analysis, there's clearly a distinction between dispersions of surface depth and sample date, possibly for treatment, and no difference between grass and interspace conditions. 
 
 ```{r run-full-model}
-
+print('Forwards Model')
 fulltest <- adonis2(formula = decadist ~ Treatment+SampleDate+Grass_Interspace+Surface_Subsurface,
                     data=meta, by='term', permutations=1e5, parallel=12, na.action = na.omit)
-str(fulltest)
+print(fulltest)
 
+print('Backwards Model')
 backwards <- adonis2(formula = decadist ~ Surface_Subsurface+Grass_Interspace+SampleDate+Treatment,
                                  data=meta, by='term', permutations=1e5, parallel=12, na.action = na.omit)
-str(backwards)
+print(backwards)
 
 print('Dispersion of Treatment')
 disptreat <- betadisper(decadist, group=meta$Treatment)

@@ -343,3 +343,4 @@ ggplot(gdat)+
   scale_shape_manual(values = mshapes)+
   facet_wrap(~SampleDate)+
   ggtitle('MDS1 v MDS2 (Function-level)')
+ggsave('figs/16S_faprotax_nmds.png')

@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE)
 As always, we begin by importing the data and preprocessing it for our main algorithm. For NMDS, we can use an n x p (samples x species/asv) matrix derived from the otu table. 
 
 ```{r import}
-ps <- readRDS('data/16Sdada2/phyloseq.filtered.rds')
+ps <- readRDS('data/16Sdada2/phyloseq.filtered.tree.rds')
 mat <- data.frame(otu_table(ps))
 dim(mat) #ensure samples x species, should have many more species
 
@@ -209,4 +209,35 @@ ggplot(gdat)+
   ggtitle('Subsurface MDS1 v MDS2')
 
 ```
+
+
+
+## Unifrac Unweighted 
+
+Here we incorporate the phylogenetic tree into our beta diversity analysis. 
+
+```{r unifrac}
+library(doParallel)
+n <- 10
+cl <- parallel::makePSOCKcluster(n)
+doParallel::registerDoParallel(cl)
+
+#prep data for unifrac
+keep_taxa <- taxa_names(otu_table(ps))
+ps <- prune_taxa(keep_taxa, ps)
+ps <- prune_taxa(taxa_sums(ps) > 0, ps)
+unweighted <- UniFrac(ps, weighted = F, parallel = T)
+
+
+```
+
+
+
+
+
+
+
+
+
+
 

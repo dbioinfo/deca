@@ -206,9 +206,9 @@ server <- function(input, output, session) {
   dat <- gdat %>%
     dplyr::filter(ASV %in% unique(funcdat_sub$ASV) ) %>%
     dplyr::left_join(funcdat_sub, by = c("ASV", "SampleID"))
-    #Apply metadata filters 
-    axes <- input$meta_axes %||% character(0)
-    fill_var <- if (length(axes) > 0) axes[[1]] else "variable"
+  #Apply metadata filters 
+  axes <- input$meta_axes %||% character(0)
+  fill_var <- if (length(axes) > 0) axes[[1]] else "variable"
     
     if (!is.null(axes) && length(axes) > 0) {
       for (ax in axes) {
@@ -235,15 +235,28 @@ server <- function(input, output, session) {
     
     #weight by enrich score? 
     if (input$use_enrichment){ #(sum of rel abund) x enrichment score from faprotax
-      dat <- dat %>% 
+      itax <- dat %>% 
         dplyr::group_by(dplyr::across(dplyr::all_of(axis_cols))) %>% 
         dplyr::summarize(weight = sum(Abundance*value, na.rm = TRUE), .groups = "drop") %>% 
-        dplyr::filter(weight >= lowpass, weight <= highpass)
-    } else { #just relative abundance
+        dplyr::filter(weight >= lowpass, weight <= highpass) %>% 
+        pull(tax) %>% unique()
+      
       dat <- dat %>% 
+        filter(tax %in% itax) %>% 
+        dplyr::group_by(dplyr::across(dplyr::all_of(axis_cols))) %>% 
+        dplyr::summarize(weight = sum(Abundance*value, na.rm = TRUE), .groups = "drop") 
+      
+    } else { #just relative abundance
+      itax <- dat %>% 
         dplyr::group_by(dplyr::across(dplyr::all_of(axis_cols))) %>% 
         dplyr::summarize(weight = sum(Abundance, na.rm = TRUE), .groups = "drop") %>% 
-        dplyr::filter(weight >= lowpass, weight <= highpass)
+        dplyr::filter(weight >= lowpass, weight <= highpass) %>% 
+        pull(tax) %>% unique()
+      
+      dat <- dat %>% 
+        filter(tax %in% itax)  %>% 
+        dplyr::group_by(dplyr::across(dplyr::all_of(axis_cols))) %>% 
+        dplyr::summarize(weight = sum(Abundance*value, na.rm = TRUE), .groups = "drop") 
     }
     
     list(dat = dat, axis_cols = axis_cols, fill_var = fill_var)

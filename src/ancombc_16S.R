@@ -6,52 +6,46 @@ setwd("~/WorkForaging/Academia/Nicole/deca/")
 
 #import data
 ps <- readRDS('data/16Sdada2/phyloseq.filtered.rds')
-meta <- sample_data(ps)
+meta <- data.frame(sample_data(ps))
 
-#run with Microhabitat+SampleDate to start
+timelevs <- c("Jul_2022","Nov_2022","Feb_2023", "Aug_2023","Nov_2023", "Feb_2024","Aug_2024")
+treatlevs <- c("Baseline","Control","Water","N", "N+P","N+Water","P","P+Water","N+P+Water")
+mhablevs <- c("SI","SG","SSI","SSG")
+gilevs <- c("I","G")
+sslevs <- c("S","SS")
+
+#fix order
+meta <- meta %>% 
+  mutate(Microhabitat = factor(Microhabitat, levels=mhablevs) ) %>% 
+  mutate(Grass_Interspace = factor(Grass_Interspace, levels=gilevs) ) %>% 
+  mutate(Surface_Subsurface = factor(Surface_Subsurface, levels=sslevs) ) %>% 
+  mutate(Treatment = factor(Treatment, levels=treatlevs) ) %>% 
+  mutate(SampleDate = factor(SampleDate, levels=timelevs) )
+
+sample_data(ps) <- sample_data(meta)
+
+#optional remove baseline samples
+ps <- subset_samples(ps, SampleDate!="Jul_2022")
+sample_data(ps)$SampleDate <- droplevels(sample_data(ps)$SampleDate)
+
+#optional rename baseline treatment to control (choose this one)
+sample_data(ps) <- data.frame(sample_data(ps)) %>%   
+  mutate(Treatment=case_when(SampleDate=="Jul_2022"~"Control",
+    .default=sample_data(ps)$Treatment))
+
+#run 
 out <- ancombc2(data = ps,
-               fix_formula='Microhabitat+SampleDate',
+               fix_formula='Surface_Subsurface+Grass_Interspace+SampleDate+Treatment',
                rand_formula = NULL,
-               tax_level="Genus",
+               tax_level="Phylum",
                p_adj_method = 'holm',
-               prv_cut = 0.1,
-               n_cl = 20,
-               group='SampleDate',
+               prv_cut = 0.01,
+               n_cl = 10,
+               group='Treatment',
                pairwise = T,
                struc_zero = T,
                neg_lb = F)
 
 #save
-saveRDS('data/16Sancombc/ancombc.out.rds')
+saveRDS(out, 'data/16Sancombc/ancombc_results_treat_phylum.rds')
 
-#graph results
-out$res_pair %>% select(starts_with("diff")) %>% summarize_all(sum)
-gdat <- out$res_pair
-sigtaxs<-gdat %>% filter(diff_ShrubCreosote|diff_ShrubMariola|diff_ShrubMesquite|diff_ShrubTarbush) %>% pull(taxon)
-ggdat <- gdat %>% 
-  filter(taxon %in% sigtaxs) %>% 
-  group_by(taxon) %>% 
-  select(starts_with("lfc")) %>% 
-  pivot_longer(starts_with("lfc"),names_to='comparison', values_to = 'LFC') %>% 
-  mutate(comparison = sub("^lfc_", "", comparison)) %>% 
-  mutate(comparison= sub("*Shrub*","", comparison))%>% 
-  mutate(comparison= sub("*Shrub*","", comparison))
-
-glevs <- c("Creosote","Mariola", "Mesquite","Tarbush", "Mariola_Creosote", 
-           "Mesquite_Creosote", "Tarbush_Creosote",  "Mesquite_Mariola","Tarbush_Mariola","Tarbush_Mesquite" )
-
-ggdat <- ggdat %>% mutate(comparison=factor(comparison, levels=glevs))
-
-gg <- ggplot(ggdat)+
-  geom_tile(mapping=aes(x=comparison, y=taxon, fill=LFC))+
-  scale_fill_viridis_c(option='plasma')+
-  theme_bw() +
-  theme(
-    text = element_text(size = 18),
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    panel.grid = element_blank(), 
-    panel.border = element_blank())+
-  xlab("")+
-  ylab("Taxon")
-gg
-ggsave('figs/Genus_lvl_heatmap.png', height=4000, width=4000, dpi=300, units='px')
