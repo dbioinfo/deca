@@ -39,18 +39,18 @@ meta <- data.frame(sample_data(ps)) %>%
   mutate(Microhabitat=factor(Microhabitat, levels=mhablevs))
 ```
 
-## Generate Distance Matrix
+## Generate BC Distance Matrix
 
-NMDS (Non-metric MultiDimensional Scaling) is a dimension reduction technique that works well for ordinal data, due to the fact that this method does not assume that the data are embedded in euclidean space like, say, PCA does. It does, however, require calculating the distance matrix which is an n x n matrix, so it can easily fit in memory. There is a more automated way to do this, with `metaMDS()`, but we will make use of the distance matrix in subsequent analyses. 
+NMDS (Non-metric MultiDimensional Scaling) is a dimension reduction technique that works well for ordinal data, due to the fact that this method does not assume that the data are embedded in euclidean space like, say, PCA does. It does, however, require calculating the distance matrix which is an n x n matrix, so it can easily fit in memory. There is a more automated way to do this, with `metaMDS()`, but we will make use of the distance matrix in subsequent analyses. We begin by generating a `bray-curtis` distance matrix, and proceed with generating a phylogenetically informed `unifrac` distance matrix. 
 
 
-```{r full-distance-bray}
+```{r bray-distance}
 X <- vegdist(mat, method='bray')
 saveRDS(X, 'data/16Svegan/bray.dist.rds')
 
 ```
 
-## Calculate NMDS
+## Calculate BC NMDS
 
 From this distance matrix, we can calculate the NMDS coordinates of each sample using the `metaMDS()` function. We choose to reduce the data into `k=3` dimensions and return not only NMDS coordinates for samples, but also species using the `wascores = T` argument. The arguments `try` and `trymax` limit the minimum and maximum numbers of random starts in search of stable solutions, each random seed requires its own calculation, the number of which that are allowed to concurrently run is controlled by the argument `parallel`. The argument `maxit` controls the maximum number of gradient descent steps allowed in each random seed. 
 
@@ -62,17 +62,17 @@ out <- metaMDS(X,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=8,
+               parallel=80,
                maxit=300)
 saveRDS(out, 'data/16Svegan/deca_full_nmds.rds')
 
 ```
 
-## Check NMDS fit
+## Check BC NMDS fit
 
 Here we ensure that the solution we found is relatively well suited to the dataset. We do this by checking the stress (for NMDS, <0.1 is desirable, >0.2 is unreliable), goodness of fit, and by plotting the observed distance in the distance matrix against the euclidean distance in NMDS space. We expect the correlation to be positive, but not necessarily linear.
 
-```{r full-goodness-of-fit, out.width="90%", dpi=300}
+```{r bray-goodness-of-fit, out.width="90%", dpi=300}
 print(paste0("Stress of NMDS model: ", out$stress))
 
 gdat <- data.frame(out$points)
@@ -94,12 +94,12 @@ stressplot(out)
 
 ```
 
-## Generate ordination plots
+## Generate BC Ordination Plots
 
-For now, we only graph in two dimensions at a time. Color is mapped to Treatment and shape is mapped to Microhabitat. 
+For now, we only graph in two dimensions at a time. Color is mapped to Treatment and shape is mapped to Microhabitat. These graphs show the highest levels of variance within the dataset; a birds eye view. We will later zoom in using the variables that best separate the data to capture a more fine-grained picture. 
 
 
-```{r graph-full-nmds, out.width="90%", dpi=300}
+```{r graph-bray-nmds, out.width="90%", dpi=300}
 ggplot(gdat)+
   geom_point(aes(x=MDS1, y=MDS2, color=Treatment, shape=Microhabitat),
              size=3, alpha=0.85)+
@@ -108,7 +108,7 @@ ggplot(gdat)+
   scale_color_manual(values = treatcols)+
   scale_shape_manual(values = mshapes)+
   facet_wrap(~SampleDate)+
-  ggtitle('MDS1 v MDS2')
+  ggtitle('BC MDS1 v MDS2')
 
 ggplot(gdat)+
   geom_point(aes(x=MDS2, y=MDS3, color=Treatment, shape=Microhabitat),
@@ -118,12 +118,12 @@ ggplot(gdat)+
   scale_color_manual(values = treatcols)+
   scale_shape_manual(values = mshapes)+
   facet_wrap(~SampleDate)+
-  ggtitle('MDS2 v MDS3')
+  ggtitle('BC MDS2 v MDS3')
 
 ```
 
 
-```{r nmds-by-depth}
+```{r bray-nmds-by-depth}
 sidx <- meta %>% filter(Surface_Subsurface=='S') %>% rownames()
 ssidx <- meta %>% filter(Surface_Subsurface=='SS') %>% rownames()
 sX <- vegdist(mat[sidx,], method='bray')
@@ -137,21 +137,21 @@ sout <- metaMDS(sX,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=8,
+               parallel=80,
                maxit=300)
-saveRDS(sout, 'data/16Svegan/deca_surface_nmds.rds')
+saveRDS(sout, 'data/16Svegan/deca_surface_bray_nmds.rds')
 ssout <- metaMDS(ssX,
                k=3,
                wascores = T,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=8,
+               parallel=80,
                maxit=300)
-saveRDS(ssout, 'data/16Svegan/deca_suburface_nmds.rds')
+saveRDS(ssout, 'data/16Svegan/deca_suburface_bray_nmds.rds')
 
-print(paste0("Stress of Surface NMDS model: ", sout$stress))
-print(paste0("Stress of Subsurface NMDS model: ", ssout$stress))
+print(paste0("Stress of Surface BC NMDS model: ", sout$stress))
+print(paste0("Stress of Subsurface BC NMDS model: ", ssout$stress))
 
 
 gdat <- data.frame(sout$points)
@@ -167,7 +167,7 @@ ggplot(gdat)+
   scale_shape_manual(values = mshapes)+
   xlab("Date")+
   ylab("Goodness of Fit")+
-  ggtitle("Surface GOF")
+  ggtitle("Surface BC GOF")
 
 stressplot(sout)
 
@@ -179,7 +179,7 @@ ggplot(gdat)+
   scale_color_manual(values = treatcols)+
   scale_shape_manual(values = mshapes)+
   facet_wrap(~SampleDate)+
-  ggtitle('Surface MDS1 v MDS2')
+  ggtitle('Surface BC MDS1 v MDS2')
 
 gdat <- data.frame(ssout$points)
 gdat$goodness <- goodness(ssout)
@@ -194,7 +194,7 @@ ggplot(gdat)+
   scale_shape_manual(values = mshapes[3:4])+
   xlab("Date")+
   ylab("Goodness of Fit")+
-  ggtitle("Subsurface GOF")
+  ggtitle("Subsurface BC GOF")
 
 stressplot(ssout)
 
@@ -206,7 +206,7 @@ ggplot(gdat)+
   scale_color_manual(values = treatcols)+
   scale_shape_manual(values = mshapes[3:4])+
   facet_wrap(~SampleDate)+
-  ggtitle('Subsurface MDS1 v MDS2')
+  ggtitle('Subsurface BC MDS1 v MDS2')
 
 ```
 
@@ -214,11 +214,11 @@ ggplot(gdat)+
 
 ## Unifrac Unweighted 
 
-Here we incorporate the phylogenetic tree into our beta diversity analysis. 
+Here we incorporate the phylogenetic tree into our beta diversity analysis by calculating an unweighted `unifrac` distance matrix. This method takes phylogenetic distance between samples into account. The results are then subject to NMDS to visualize the clustering in lower dimensions. We repeat the steps as above with the `bray-curtis` distance matrix. 
 
-```{r unifrac}
+```{r unifrac-distance}
 library(doParallel)
-n <- 10
+n <- 80
 cl <- parallel::makePSOCKcluster(n)
 doParallel::registerDoParallel(cl)
 
@@ -226,18 +226,159 @@ doParallel::registerDoParallel(cl)
 keep_taxa <- taxa_names(otu_table(ps))
 ps <- prune_taxa(keep_taxa, ps)
 ps <- prune_taxa(taxa_sums(ps) > 0, ps)
+ps <- subset_samples(ps, sample_sums(ps) > 0)
 unweighted <- UniFrac(ps, weighted = F, parallel = T)
 
+#save results
+saveRDS(unweighted, "data/16Svegan/unifrac.dist.rds")
+
+#run nmds
+out <- metaMDS(unweighted,
+               k=3,
+               wascores = T,
+               weakties=T,
+               try=50,
+               trymax=100,
+               parallel=80,
+               maxit=300)
+saveRDS(out, 'data/16Svegan/deca_unifrac_nmds.rds')
+```
+
+```{r unifrac-goodness-of-fit, out.width="90%", dpi=300}
+print(paste0("Stress of Unweighted Unifrac NMDS model: ", out$stress))
+
+gdat <- data.frame(out$points)
+gdat$goodness <- goodness(out)
+gdat$Sample <- rownames(gdat)
+gdat <- left_join(gdat, meta, by='Sample')
+
+ggplot(gdat)+
+  geom_jitter(aes(x=SampleDate, y=goodness, color=Treatment, shape=Microhabitat), 
+              size=4, height = 0, width=0.25, alpha=0.85)+
+  theme_bw()+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  xlab("Date")+
+  ylab("Goodness of Fit")
+
+
+stressplot(out)
 
 ```
 
 
+```{r graph-unifrac-nmds, out.width="90%", dpi=300}
+ggplot(gdat)+
+  geom_point(aes(x=MDS1, y=MDS2, color=Treatment, shape=Microhabitat),
+             size=3, alpha=0.85)+
+  theme_bw()+
+  theme(text = element_text(size=15))+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  facet_wrap(~SampleDate)+
+  ggtitle('Unweighted Unifrac MDS1 v MDS2')
+
+ggplot(gdat)+
+  geom_point(aes(x=MDS2, y=MDS3, color=Treatment, shape=Microhabitat),
+             size=3, alpha=0.85)+
+  theme_bw()+
+  theme(text = element_text(size=15))+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  facet_wrap(~SampleDate)+
+  ggtitle('Unweighted Unifrac MDS2 v MDS3')
+
+```
 
 
+```{r unifrac-nmds-by-depth}
+sidx <- meta %>% filter(Surface_Subsurface=='S') %>% rownames()
+ssidx <- meta %>% filter(Surface_Subsurface=='SS') %>% rownames()
+
+sX <- UniFrac(subset_samples(ps, sample_names(ps) %in% sidx)  , weighted = F, parallel = T)
+saveRDS(sX, 'data/16Svegan/surface.unifrac.dist.rds')
+
+ssX <- UniFrac(subset_samples(ps, sample_names(ps) %in% sidx)  , weighted = F, parallel = T)
+saveRDS(ssX, 'data/16Svegan/subsurface.unifrac.dist.rds')
+
+sout <- metaMDS(sX,
+               k=3,
+               wascores = T,
+               weakties=T,
+               try=50,
+               trymax=100,
+               parallel=80,
+               maxit=300)
+saveRDS(sout, 'data/16Svegan/deca_surface_unifrac_nmds.rds')
+ssout <- metaMDS(ssX,
+               k=3,
+               wascores = T,
+               weakties=T,
+               try=50,
+               trymax=100,
+               parallel=80,
+               maxit=300)
+saveRDS(ssout, 'data/16Svegan/deca_suburface_unifrac_nmds.rds')
+
+print(paste0("Stress of Surface Unweighted Unifrac NMDS model: ", sout$stress))
+print(paste0("Stress of Subsurface Unweighted Unifrac NMDS model: ", ssout$stress))
 
 
+gdat <- data.frame(sout$points)
+gdat$goodness <- goodness(sout)
+gdat$Sample <- rownames(gdat)
+gdat <- left_join(gdat, meta, by='Sample')
 
+ggplot(gdat)+
+  geom_jitter(aes(x=SampleDate, y=goodness, color=Treatment, shape=Microhabitat), 
+              size=4, height = 0, width=0.25, alpha=0.85)+
+  theme_bw()+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  xlab("Date")+
+  ylab("Goodness of Fit")+
+  ggtitle("Surface Unweighted Unifrac GOF")
 
+stressplot(sout)
+
+ggplot(gdat)+
+  geom_point(aes(x=MDS1, y=MDS2, color=Treatment, shape=Microhabitat),
+             size=3, alpha=0.85)+
+  theme_bw()+
+  theme(text = element_text(size=15))+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes)+
+  facet_wrap(~SampleDate)+
+  ggtitle('Surface Unweighted Unifrac MDS1 v MDS2')
+
+gdat <- data.frame(ssout$points)
+gdat$goodness <- goodness(ssout)
+gdat$Sample <- rownames(gdat)
+gdat <- left_join(gdat, meta, by='Sample')
+
+ggplot(gdat)+
+  geom_jitter(aes(x=SampleDate, y=goodness, color=Treatment, shape=Microhabitat), 
+              size=4, height = 0, width=0.25, alpha=0.85)+
+  theme_bw()+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes[3:4])+
+  xlab("Date")+
+  ylab("Goodness of Fit")+
+  ggtitle("Subsurface Unweighted Unifrac GOF")
+
+stressplot(ssout)
+
+ggplot(gdat)+
+  geom_point(aes(x=MDS1, y=MDS2, color=Treatment, shape=Microhabitat),
+             size=3, alpha=0.85)+
+  theme_bw()+
+  theme(text = element_text(size=15))+
+  scale_color_manual(values = treatcols)+
+  scale_shape_manual(values = mshapes[3:4])+
+  facet_wrap(~SampleDate)+
+  ggtitle('Subsurface Unweighted Unifrac MDS1 v MDS2')
+
+```
 
 
 
