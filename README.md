@@ -6,6 +6,9 @@ src/deca_16Sdada2.Rmd
 src/decontam_16S.Rmd
 - We then use the decontam package and our negative control to remove any identified ASVs. We also filter out any samples with <2500 Abundance as well as ASVs unique to a sample.
 
+src/deca_16S_add_phylogeny.R
+- In order to get a phylogenetic view of the data, we attach a reference tree with our ASVs attached to the tips. See also src/deca_16S_gen_newick.sh
+
 src/deca_16Smirlyn.Rmd
 - We then have to rarefy the samples due to varying library sizes before calculating alpha diversities and differential abundance.  
 
