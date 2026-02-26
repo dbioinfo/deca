@@ -1,9 +1,11 @@
 ---
-title: "deca_16Sordination"
+title: "cyano_16Sordination"
 author: "Dylan Barth"
-date: "2026-2-23"
+date: "2026-2-24"
 output: html_document
 ---
+
+# Cyanobacteriota Report
 
 ```{r setup, include=FALSE}
 #import libraries and set wd
@@ -20,7 +22,7 @@ knitr::opts_chunk$set(echo = TRUE)
 As always, we begin by importing the data and preprocessing it for our main algorithm. For NMDS, we can use an n x p (samples x species/asv) matrix derived from the otu table. 
 
 ```{r import}
-ps <- readRDS('data/16Sdada2/phyloseq.filtered.tree.rds')
+ps <- readRDS('data/cyano/phyloseq.cyano.tree.rds')
 mat <- data.frame(otu_table(ps))
 dim(mat) #ensure samples x species, should have many more species
 
@@ -46,7 +48,7 @@ NMDS (Non-metric MultiDimensional Scaling) is a dimension reduction technique th
 
 ```{r bray-distance}
 X <- vegdist(mat, method='bray')
-saveRDS(X, 'data/16Svegan/bray.dist.rds')
+saveRDS(X, 'data/cyano/cyano.bray.dist.rds')
 
 ```
 
@@ -62,9 +64,9 @@ out <- metaMDS(X,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=80,
+               parallel=8,
                maxit=300)
-saveRDS(out, 'data/16Svegan/deca_full_nmds.rds')
+saveRDS(out, 'data/cyano/cyano_full_nmds.rds')
 
 ```
 
@@ -127,9 +129,9 @@ ggplot(gdat)+
 sidx <- meta %>% filter(Surface_Subsurface=='S') %>% rownames()
 ssidx <- meta %>% filter(Surface_Subsurface=='SS') %>% rownames()
 sX <- vegdist(mat[sidx,], method='bray')
-saveRDS(sX, 'data/16Svegan/surface.bray.dist.rds')
+saveRDS(sX, 'data/cyano/cyano.surface.bray.dist.rds')
 ssX <- vegdist(mat[ssidx,], method='bray')
-saveRDS(ssX, 'data/16Svegan/subsurface.bray.dist.rds')
+saveRDS(ssX, 'data/cyano/cyano.subsurface.bray.dist.rds')
 
 sout <- metaMDS(sX,
                k=3,
@@ -137,18 +139,18 @@ sout <- metaMDS(sX,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=80,
+               parallel=8,
                maxit=300)
-saveRDS(sout, 'data/16Svegan/deca_surface_bray_nmds.rds')
+saveRDS(sout, 'data/cyano/cyano_surface_bray_nmds.rds')
 ssout <- metaMDS(ssX,
                k=3,
                wascores = T,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=80,
+               parallel=8,
                maxit=300)
-saveRDS(ssout, 'data/16Svegan/deca_suburface_bray_nmds.rds')
+saveRDS(ssout, 'data/cyano/cyano_suburface_bray_nmds.rds')
 
 print(paste0("Stress of Surface BC NMDS model: ", sout$stress))
 print(paste0("Stress of Subsurface BC NMDS model: ", ssout$stress))
@@ -212,25 +214,27 @@ ggplot(gdat)+
 
 
 
+
+
+Interestingly, the low abundance across samples of phylum cyanobacteriota seems to have made the normal BC algorithm malfunction and offer a poor fit. A much better fit is found in the unifrac distance metric. However, it is interesting that the clusters that appear are less correlated to the surface / subsurface distinction than one might imagine given the photosynthetic nature of cyanos. 
+
+
+
 ## Unifrac Unweighted 
 
 Here we incorporate the phylogenetic tree into our beta diversity analysis by calculating an unweighted `unifrac` distance matrix. This method takes phylogenetic distance between samples into account. The results are then subject to NMDS to visualize the clustering in lower dimensions. We repeat the steps as above with the `bray-curtis` distance matrix. 
 
 ```{r unifrac-distance}
-library(doParallel)
-n <- 80
-cl <- parallel::makePSOCKcluster(n)
-doParallel::registerDoParallel(cl)
 
 #prep data for unifrac
 keep_taxa <- taxa_names(otu_table(ps))
 ps <- prune_taxa(keep_taxa, ps)
 ps <- prune_taxa(taxa_sums(ps) > 0, ps)
 ps <- subset_samples(ps, sample_sums(ps) > 0)
-unweighted <- UniFrac(ps, weighted = F, parallel = T)
+unweighted <- UniFrac(ps, weighted = F, parallel = F)
 
 #save results
-saveRDS(unweighted, "data/16Svegan/unifrac.dist.rds")
+saveRDS(unweighted, "data/cyano/cyano.unifrac.dist.rds")
 
 #run nmds
 out <- metaMDS(unweighted,
@@ -239,9 +243,9 @@ out <- metaMDS(unweighted,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=80,
+               parallel=8,
                maxit=300)
-saveRDS(out, 'data/16Svegan/deca_unifrac_nmds.rds')
+saveRDS(out, 'data/cyano/cyano_unifrac_nmds.rds')
 ```
 
 ```{r unifrac-goodness-of-fit, out.width="90%", dpi=300}
@@ -295,11 +299,11 @@ ggplot(gdat)+
 sidx <- meta %>% filter(Surface_Subsurface=='S') %>% rownames()
 ssidx <- meta %>% filter(Surface_Subsurface=='SS') %>% rownames()
 
-sX <- UniFrac(subset_samples(ps, sample_names(ps) %in% sidx)  , weighted = F, parallel = T)
+sX <- UniFrac(subset_samples(ps, sample_names(ps) %in% sidx)  , weighted = F, parallel = F)
 saveRDS(sX, 'data/16Svegan/surface.unifrac.dist.rds')
 
-ssX <- UniFrac(subset_samples(ps, sample_names(ps) %in% sidx)  , weighted = F, parallel = T)
-saveRDS(ssX, 'data/16Svegan/subsurface.unifrac.dist.rds')
+ssX <- UniFrac(subset_samples(ps, sample_names(ps) %in% sidx)  , weighted = F, parallel = F)
+saveRDS(ssX, 'data/cyano/cyano.subsurface.unifrac.dist.rds')
 
 sout <- metaMDS(sX,
                k=3,
@@ -307,18 +311,18 @@ sout <- metaMDS(sX,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=80,
+               parallel=8,
                maxit=300)
-saveRDS(sout, 'data/16Svegan/deca_surface_unifrac_nmds.rds')
+saveRDS(sout, 'data/cyano/cyano_surface_unifrac_nmds.rds')
 ssout <- metaMDS(ssX,
                k=3,
                wascores = T,
                weakties=T,
                try=50,
                trymax=100,
-               parallel=80,
+               parallel=8,
                maxit=300)
-saveRDS(ssout, 'data/16Svegan/deca_suburface_unifrac_nmds.rds')
+saveRDS(ssout, 'data/cyano/cyano_suburface_unifrac_nmds.rds')
 
 print(paste0("Stress of Surface Unweighted Unifrac NMDS model: ", sout$stress))
 print(paste0("Stress of Subsurface Unweighted Unifrac NMDS model: ", ssout$stress))
