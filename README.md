@@ -37,7 +37,7 @@ graph TB;
 |Phylogenetic ASV placement|`src/deca_16S_gen_newick.sh`|In order to get a phylogenetic view of the data, we generate a reference tree with our ASVs attached to the tips|
 ||`src/deca_16S_add_phylogeny.R`|For convenience we attach the tree to our phyloseq object|
 ||`src/deca_16S_viz_phylo.R`|Here we vizualize some static examples of phylogenetic trees|
-|Replicate analyses for Cyanobacteria|`deca_subset_cyano.R`|Here we subset the phyloseq object to include only ASVs assigned Phylum Cyanobacteria|
+|Replicate analyses for Cyanobacteria|`src/deca_subset_cyano.R`|Here we subset the phyloseq object to include only ASVs assigned Phylum Cyanobacteria|
 |Functional annotation|`src/deca_16S_faprotax.Rmd`|We annotate identified ASVs with FAPROTAX functional annotations|
 ||`src/cyano_16S_faprotax.Rmd`|Same as above, but subset for Phylum Cyanobacteriota|
 ||`src/deca_16S_faprotax_eda.Rmd`|Here we generate **interactive** alluvial plots connecting relative abundance & sample metadata to functional annotations|
