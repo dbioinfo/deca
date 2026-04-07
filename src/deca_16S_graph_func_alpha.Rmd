@@ -1,7 +1,7 @@
 ---
-title: "deca_16S_graph_rare_alpha"
+title: "deca_16S_graph_func_alpha"
 author: "Dylan Barth"
-date: "2026-01-05"
+date: "2026-03-31"
 output: html_document
 ---
 
@@ -11,6 +11,7 @@ library(colorspace)
 library(phyloseq)
 library(ggh4x)
 library(DBI)
+library(mFD)
 library(picante)
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
@@ -35,22 +36,21 @@ otu <- otu[,setdiff( colnames(otu),c('STANDARD_1_S162') )] #remove control sampl
 
 
 ps <- readRDS("data/16Sdada2/phyloseq.filtered.tree.rds")
+
+func <- readRDS('data/16Sfaprotax/faprotax_abund.rds')
 ```
 
-## Calculate alpha indices
+## Calculate functional alpha indices
 
 Next we calculate each of the metrics we are interested in, these are Richness, Evenness, Shannon and Simpson alpha indices. 
 
-```{r alphas}
+```{r func-alphas}
+tmp <- func$res_spe_func_perc
 
-rich <- vegan::specnumber(t(otu[2:length(otu)]))
-shan <- vegan::diversity(t(otu[2:length(otu)]), index = 'shannon')
-simp <- vegan::diversity(t(otu[2:length(otu)]), index = 'simpson')
+rich <- vegan::specnumber(tmp)
+shan <- vegan::diversity(tmp, index = 'shannon')
+simp <- vegan::diversity(tmp, index = 'simpson')
 peven <- shan / log(rich)
-
-rownames(otu) <- otu$ASV
-tmp <- t(otu[,2:length(otu)])
-faith <- pd(tmp, phy_tree(ps), include.root = F)
 
 ```
 
@@ -63,9 +63,9 @@ gdat <- left_join(meta,  data.frame(richness=rich, Sample=names(rich)), by='Samp
 gdat <- left_join(gdat,  data.frame(shannon=shan, Sample=names(shan)), by='Sample')
 gdat <- left_join(gdat,  data.frame(simpson=simp, Sample=names(simp)), by='Sample')
 gdat <- left_join(gdat,  data.frame(evenness=peven, Sample=names(peven)), by='Sample')
-gdat <- left_join(gdat, data.frame(faith=faith$PD, Sample=rownames(faith)), by="Sample")
+#gdat <- left_join(gdat, data.frame(faith=faith$PD, Sample=rownames(faith)), by="Sample")
 
-gdat <- gdat %>% group_by(Sample) %>% pivot_longer(cols = c(richness, shannon, simpson, evenness, faith), names_to = 'metric', values_to = 'Alpha')
+gdat <- gdat %>% group_by(Sample) %>% pivot_longer(cols = c(richness, shannon, simpson, evenness), names_to = 'metric', values_to = 'Alpha')
 
 treatcols <- c("#E5AE71","#71C4E5","#53DF7B","#C0E5A4","#BCE7D6","#DF53B7","#E7BCCC","#804DEF")
 treatlevs <- c("Control","Water","N", "N+P","N+Water","P","P+Water","N+P+Water")
@@ -93,9 +93,10 @@ g1 <- ggplot(gdat)+
   scale_shape_manual(values = mshapes)+
   theme_bw()+
   theme(text = element_text(size=15),
-        axis.text.x = element_text(angle = 45, vjust=.9, hjust=.9))
+        axis.text.x = element_text(angle = 45, vjust=.9, hjust=.9))+
+  ggtitle("Functional Alpha Diversity")
 
-ggsave('figs/mirl_alpha_boxplot.png', g1, width = 7000, height=4000 ,units='px')
+ggsave('figs/mirl_functional_alpha_boxplot.png', g1, width = 7000, height=4000 ,units='px')
 
 g1
 

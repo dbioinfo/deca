@@ -35,7 +35,7 @@ mcols <- c("#B897DD","#BCDD97","#B43FEE","#78EE3F")
 mshapes <- c(25,10,17,16)
 
 meta <- data.frame(sample_data(ps)) %>% 
-  rename(Sample=SampleID) %>% 
+  rename('Sample'='SampleID') %>% 
   mutate(SampleDate=factor(SampleDate, levels=timelevs)) %>% 
   mutate(Treatment=factor(Treatment, levels=treatlevs)) %>% 
   mutate(Microhabitat=factor(Microhabitat, levels=mhablevs))
@@ -125,13 +125,13 @@ ggplot(gdat)+
 ```
 
 
-```{r bray-nmds-by-depth}
-sidx <- meta %>% filter(Surface_Subsurface=='S') %>% rownames()
-ssidx <- meta %>% filter(Surface_Subsurface=='SS') %>% rownames()
+```{r bray-nmds-by-habitat}
+sidx <- meta %>% filter(Grass_Interspace=='G') %>% rownames()
+ssidx <- meta %>% filter(Grass_Interspace=='I') %>% rownames()
 sX <- vegdist(mat[sidx,], method='bray')
-saveRDS(sX, 'data/cyano/cyano.surface.bray.dist.rds')
+saveRDS(sX, 'data/cyano/cyano.grass.bray.dist.rds')
 ssX <- vegdist(mat[ssidx,], method='bray')
-saveRDS(ssX, 'data/cyano/cyano.subsurface.bray.dist.rds')
+saveRDS(ssX, 'data/cyano/cyano.interspace.bray.dist.rds')
 
 sout <- metaMDS(sX,
                k=3,
@@ -141,7 +141,7 @@ sout <- metaMDS(sX,
                trymax=100,
                parallel=8,
                maxit=300)
-saveRDS(sout, 'data/cyano/cyano_surface_bray_nmds.rds')
+saveRDS(sout, 'data/cyano/cyano_grass_bray_nmds.rds')
 ssout <- metaMDS(ssX,
                k=3,
                wascores = T,
@@ -150,10 +150,10 @@ ssout <- metaMDS(ssX,
                trymax=100,
                parallel=8,
                maxit=300)
-saveRDS(ssout, 'data/cyano/cyano_suburface_bray_nmds.rds')
+saveRDS(ssout, 'data/cyano/cyano_interspace_bray_nmds.rds')
 
-print(paste0("Stress of Surface BC NMDS model: ", sout$stress))
-print(paste0("Stress of Subsurface BC NMDS model: ", ssout$stress))
+print(paste0("Stress of Grass BC NMDS model: ", sout$stress))
+print(paste0("Stress of Interspace BC NMDS model: ", ssout$stress))
 
 
 gdat <- data.frame(sout$points)
@@ -169,7 +169,7 @@ ggplot(gdat)+
   scale_shape_manual(values = mshapes)+
   xlab("Date")+
   ylab("Goodness of Fit")+
-  ggtitle("Surface BC GOF")
+  ggtitle("Grass BC GOF")
 
 stressplot(sout)
 
@@ -181,7 +181,7 @@ ggplot(gdat)+
   scale_color_manual(values = treatcols)+
   scale_shape_manual(values = mshapes)+
   facet_wrap(~SampleDate)+
-  ggtitle('Surface BC MDS1 v MDS2')
+  ggtitle('Grass BC MDS1 v MDS2')
 
 gdat <- data.frame(ssout$points)
 gdat$goodness <- goodness(ssout)
@@ -196,7 +196,7 @@ ggplot(gdat)+
   scale_shape_manual(values = mshapes[3:4])+
   xlab("Date")+
   ylab("Goodness of Fit")+
-  ggtitle("Subsurface BC GOF")
+  ggtitle("Interspace BC GOF")
 
 stressplot(ssout)
 
@@ -208,7 +208,7 @@ ggplot(gdat)+
   scale_color_manual(values = treatcols)+
   scale_shape_manual(values = mshapes[3:4])+
   facet_wrap(~SampleDate)+
-  ggtitle('Subsurface BC MDS1 v MDS2')
+  ggtitle('Interspace BC MDS1 v MDS2')
 
 ```
 
@@ -295,15 +295,15 @@ ggplot(gdat)+
 ```
 
 
-```{r unifrac-nmds-by-depth}
-sidx <- meta %>% filter(Surface_Subsurface=='S') %>% rownames()
-ssidx <- meta %>% filter(Surface_Subsurface=='SS') %>% rownames()
+```{r unifrac-nmds-by-habitat}
+sidx <- meta %>% filter(Grass_Interspace=='G') %>% rownames()
+ssidx <- meta %>% filter(Grass_Interspace=='I') %>% rownames()
 
 sX <- UniFrac(subset_samples(ps, sample_names(ps) %in% sidx)  , weighted = F, parallel = F)
-saveRDS(sX, 'data/16Svegan/surface.unifrac.dist.rds')
+saveRDS(sX, 'data/cyano/cyano.grass.unifrac.dist.rds')
 
-ssX <- UniFrac(subset_samples(ps, sample_names(ps) %in% sidx)  , weighted = F, parallel = F)
-saveRDS(ssX, 'data/cyano/cyano.subsurface.unifrac.dist.rds')
+ssX <- UniFrac(subset_samples(ps, sample_names(ps) %in% ssidx)  , weighted = F, parallel = F)
+saveRDS(ssX, 'data/cyano/cyano.interspace.unifrac.dist.rds')
 
 sout <- metaMDS(sX,
                k=3,
@@ -313,7 +313,7 @@ sout <- metaMDS(sX,
                trymax=100,
                parallel=8,
                maxit=300)
-saveRDS(sout, 'data/cyano/cyano_surface_unifrac_nmds.rds')
+saveRDS(sout, 'data/cyano/cyano_grass_unifrac_nmds.rds')
 ssout <- metaMDS(ssX,
                k=3,
                wascores = T,
@@ -322,10 +322,10 @@ ssout <- metaMDS(ssX,
                trymax=100,
                parallel=8,
                maxit=300)
-saveRDS(ssout, 'data/cyano/cyano_suburface_unifrac_nmds.rds')
+saveRDS(ssout, 'data/cyano/cyano_interspace_unifrac_nmds.rds')
 
-print(paste0("Stress of Surface Unweighted Unifrac NMDS model: ", sout$stress))
-print(paste0("Stress of Subsurface Unweighted Unifrac NMDS model: ", ssout$stress))
+print(paste0("Stress of Grass Unweighted Unifrac NMDS model: ", sout$stress))
+print(paste0("Stress of Interspace Unweighted Unifrac NMDS model: ", ssout$stress))
 
 
 gdat <- data.frame(sout$points)
@@ -341,7 +341,7 @@ ggplot(gdat)+
   scale_shape_manual(values = mshapes)+
   xlab("Date")+
   ylab("Goodness of Fit")+
-  ggtitle("Surface Unweighted Unifrac GOF")
+  ggtitle("Grass Unweighted Unifrac GOF")
 
 stressplot(sout)
 
@@ -353,7 +353,7 @@ ggplot(gdat)+
   scale_color_manual(values = treatcols)+
   scale_shape_manual(values = mshapes)+
   facet_wrap(~SampleDate)+
-  ggtitle('Surface Unweighted Unifrac MDS1 v MDS2')
+  ggtitle('Grass Unweighted Unifrac MDS1 v MDS2')
 
 gdat <- data.frame(ssout$points)
 gdat$goodness <- goodness(ssout)
@@ -368,7 +368,7 @@ ggplot(gdat)+
   scale_shape_manual(values = mshapes[3:4])+
   xlab("Date")+
   ylab("Goodness of Fit")+
-  ggtitle("Subsurface Unweighted Unifrac GOF")
+  ggtitle("Interspace Unweighted Unifrac GOF")
 
 stressplot(ssout)
 
@@ -380,7 +380,7 @@ ggplot(gdat)+
   scale_color_manual(values = treatcols)+
   scale_shape_manual(values = mshapes[3:4])+
   facet_wrap(~SampleDate)+
-  ggtitle('Subsurface Unweighted Unifrac MDS1 v MDS2')
+  ggtitle('Interspace Unweighted Unifrac MDS1 v MDS2')
 
 ```
 

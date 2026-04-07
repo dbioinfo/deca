@@ -1,0 +1,142 @@
+---
+title: "cyano_bubble_plots.Rmd"
+author: "Dylan Barth"
+date: "2026-03-29"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(phyloseq)
+library(circlize)
+library(scales)  
+library(shiny)
+library(rlang)
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '~/WorkForaging/Academia/Nicole/deca/')
+```
+
+## Cyanobacteria Relative Abundance Interactive
+
+Here, since ANCOMBC isn't exactly appropriate for this subset of data, we show average relative abundance at various taxonomic levels across a chosen metadata variable. We begin, as always, by preprocessing the data. 
+
+```{r prep-data}
+
+ps <- readRDS("data/cyano/phyloseq.cyano.tree.rds")
+variables <- c("Microhabitat","Treatment","SampleDate")
+otu <- data.frame(otu_table(ps))
+tax <- data.frame(tax_table(ps)) %>% rownames_to_column("ASV")
+meta <- data.frame(sample_data(ps))
+
+timelevs <- c("Jul_2022","Nov_2022","Feb_2023", "Aug_2023","Nov_2023", "Feb_2024","Aug_2024")
+treatlevs <- c("Baseline","Control","Water","N", "N+P","N+Water","P","P+Water","N+P+Water")
+
+meta$Treatment <- factor(meta$Treatment, levels = treatlevs)
+meta$SampleDate <- factor(meta$SampleDate, levels = timelevs)
+
+```
+
+### Shiny Dashboard
+
+Then we enable the user to make plots as she wishes at combinations of taxonomic levels and different metadata variables. We also add in a save button to save the figures for slides, papers, proposals etc. 
+
+```{r shiny-bubble, echo=FALSE, message=FALSE, warning=FALSE}
+
+# ---- UI ----
+all_tax_ranks <- c("Class","Order","Family","Genus")#c("Kingdom","Phylum","Class","Order","Family","Genus","Species") #Genus
+all_meta_axes <- c("Treatment","SampleDate")
+
+ui <- fillPage(
+  titlePanel("Cyano Relative Abundnace Bubble Plots"),
+  sidebarLayout(
+    sidebarPanel(
+
+      selectizeInput(
+        "row_order_var", "Metadata variable on X axis", 
+        selected = "Microhabitat", choices = all_meta_axes,
+        options = list(plugins = list("remove_button"))
+      ),
+      
+      selectizeInput(
+        "tax_rank", "Taxonomic Scope",
+        choices = all_tax_ranks, selected = "Order",
+        options = list(plugins = list("remove_button"))
+      ),
+      
+      
+
+      textInput("plot_title", "Plot title", value = "Cyanobacteria Relative Abundance"),
+
+            fluidRow(
+        column(6, actionButton("refresh", "Refresh", class = "btn-primary")),
+        column(6, downloadButton("save_plot", "Save figure"))
+      )
+    ),
+    
+    mainPanel(
+      plotOutput("bubble_plot", width="1250px", height = "750px")
+    )
+  )
+)
+
+#--- SERVER ---
+server <- function(input, output, session) {
+
+  mainplot <- eventReactive(input$refresh, { #generate plot on refresh
+      req(input$row_order_var)
+      req(input$tax_rank)
+      req(input$plot_title)
+    
+      ivar <- input$row_order_var
+      itax <- input$tax_rank
+      ititle <- input$plot_title
+      
+      iotu <- prop.table(as.matrix(otu), margin = 1) %>% 
+        as.data.frame() %>% 
+        rownames_to_column("SampleID") %>% 
+        pivot_longer(!SampleID, names_to = 'ASV', values_to = "Rel_Abundance") %>% 
+        left_join(., meta %>% select(SampleID, SampleDate, Microhabitat, Treatment), by='SampleID') %>% 
+        left_join(., tax, by="ASV")
+      
+      taxord <- iotu %>% group_by(!!sym(itax)) %>% summarize(Rel_Abundance=mean(Rel_Abundance)) %>% arrange(Rel_Abundance) %>% pull(itax) 
+      
+      gdat <- iotu %>% group_by(!!sym(ivar), !!sym(itax), Microhabitat) %>% 
+        summarize(Rel_Abundance=mean(Rel_Abundance)) %>% 
+        mutate(tax = factor(!!sym(itax), levels=taxord) ) %>% arrange(tax)
+      
+      
+      
+      ggplot(gdat, aes(x = !!sym(ivar), y = tax)) +
+        geom_point(aes(size = Rel_Abundance, fill = Rel_Abundance), shape = 21, color = "black", alpha = 0.9) +
+        scale_size_continuous(name = "Relative Abundance", range = c(1.5, 10)) +
+        scale_fill_gradient2(name = "Relative Abundance", midpoint = 0, transform = 'reverse') +
+        labs(x = ivar, y = itax) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+              text = element_text(size=18)) +
+        facet_grid(~Microhabitat, scales = "free_x", space='free_x')+
+        ggtitle(ititle)
+  })
+  
+  output$bubble_plot <- renderPlot({
+    mainplot()
+  })
+  
+  output$save_plot <- downloadHandler(
+    filename = function() {
+      nm <- input$plot_title
+      if (is.null(nm) || !nzchar(nm)) nm <- "bubble_plot"
+      nm <- gsub("[^A-Za-z0-9_-]+", "_", nm)
+      paste0(nm, ".png")
+    },
+    content = function(file) {
+      ggsave(file, plot = mainplot(), width=5000, height = 3000, units='px')
+    }
+  )
+  
+  
+}
+
+shinyApp(ui, server)
+```

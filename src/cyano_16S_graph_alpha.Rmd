@@ -80,6 +80,11 @@ g1 <- ggplot(gdat)+
 
 ggsave('figs/cyano_alpha_boxplot.png', g1, width = 7000, height=4000 ,units='px')
 
-g1
+```
+
+```{r final_print, fig.width=15, fig.height=10, out.width='100%'}
+g1 
+
+
 
 ```
